@@ -1,56 +1,158 @@
+using TMPro;
 using UnityEngine;
+using UnityEngine.Events;
 using UnityEngine.UI;
 using MindTiles.Core;
-using MindTiles.Grid;
-using MindTiles.Validation;
 
 namespace MindTiles.UI
 {
+    // Thin input layer for the game scene: it only wires buttons to actions.
+    // Game rules live elsewhere (GameManager = flow/pause, HintManager = hints,
+    // PatternValidator = checking), so this class never decides anything itself.
+    //
+    // All listeners are added in OnEnable and removed in OnDisable, so there is
+    // no need for (and no point adding) OnClick entries in the Inspector.
     public class ButtonManager : MonoBehaviour
     {
+        [Header("Gameplay Buttons")]
         [SerializeField] private Button pauseButton;
+        [SerializeField] private Button resumeButton;
         [SerializeField] private Button backButton;
-        [SerializeField] private Button hintButton;
         [SerializeField] private Button checkButton;
+        [SerializeField] private Button hintButton;
+        [SerializeField] private Button secondHintButton;
 
+        [Header("Hint Count Badges (red circle, top-right of each hint button)")]
+        [SerializeField] private TMP_Text hintCountText;
+        [SerializeField] private TMP_Text secondHintCountText;
+
+        [Header("Result Panel Buttons")]
+        [SerializeField] private Button nextLevelButton;
+        [SerializeField] private Button endMenuButton;
+
+        [Header("Panels")]
         [SerializeField] private GameObject pausePanel;
 
-        private void Awake()
+        [Header("Systems")]
+        [SerializeField] private HintManager hintManager;
+
+        private void OnEnable()
         {
-            pauseButton?.onClick.AddListener(PauseGame);
-            backButton?.onClick.AddListener(BackToMenu);
-            hintButton?.onClick.AddListener(HintAny);
-            checkButton?.onClick.AddListener(CheckBoard);
+            Bind(pauseButton, PauseGame);
+            Bind(resumeButton, ResumeGame);
+            Bind(backButton, BackToMenu);
+            Bind(checkButton, CheckBoard);
+            Bind(hintButton, UseHint);
+            Bind(secondHintButton, UseSecondHint);
+            Bind(nextLevelButton, NextLevel);
+            Bind(endMenuButton, BackToMenu);
+
+            GameManager.RoundFinished += HideRoundButtons;
+            GameManager.RoundStarted += ShowRoundButtons;
+            GameManager.HintCountsChanged += RefreshHintCounts;
+            RefreshHintCounts();
         }
 
-        public void PauseGame()
+        private void OnDisable()
         {
-            Time.timeScale = 0f;
-            if (pausePanel != null)
-                pausePanel.SetActive(true);
+            Unbind(pauseButton, PauseGame);
+            Unbind(resumeButton, ResumeGame);
+            Unbind(backButton, BackToMenu);
+            Unbind(checkButton, CheckBoard);
+            Unbind(hintButton, UseHint);
+            Unbind(secondHintButton, UseSecondHint);
+            Unbind(nextLevelButton, NextLevel);
+            Unbind(endMenuButton, BackToMenu);
+
+            GameManager.RoundFinished -= HideRoundButtons;
+            GameManager.RoundStarted -= ShowRoundButtons;
+            GameManager.HintCountsChanged -= RefreshHintCounts;
         }
 
-        public void ResumeGame()
+        private void Start()
         {
-            Time.timeScale = 1f;
-            if (pausePanel != null)
-                pausePanel.SetActive(false);
+            // GameManager.Instance exists by now (it sets itself in Awake); OnEnable may have run first.
+            RefreshHintCounts();
         }
 
-        public void BackToMenu()
+        // Badge numbers + greying out a hint button once its hints are used up.
+        private void RefreshHintCounts()
         {
-            GameManager.Instance?.GoToMainMenu();
+            if (GameManager.Instance == null) return;
+
+            ApplyCount(hintButton, hintCountText, GameManager.Instance.GetHintCount(HintType.OneTile));
+            ApplyCount(secondHintButton, secondHintCountText, GameManager.Instance.GetHintCount(HintType.AllTiles));
         }
 
-        public void HintAny()
+        private static void ApplyCount(Button button, TMP_Text badge, int count)
         {
-            TileController hintTile = PatternValidator.Instance?.GetHintTile();
-            hintTile?.GetComponent<TileHighlight>()?.FlashHint(1f);
+            if (badge != null) badge.text = count.ToString();
+            if (button != null) button.interactable = count > 0;
         }
 
-        public void CheckBoard()
+        // Check + both hint buttons are only usable while a round is being played.
+        private void HideRoundButtons() => SetRoundButtonsVisible(false);
+        private void ShowRoundButtons() => SetRoundButtonsVisible(true);
+
+        private void SetRoundButtonsVisible(bool visible)
         {
-            PatternValidator.Instance?.CheckAndFinishRound();
+            if (checkButton != null) checkButton.gameObject.SetActive(visible);
+            if (hintButton != null) hintButton.gameObject.SetActive(visible);
+            if (secondHintButton != null) secondHintButton.gameObject.SetActive(visible);
+        }
+
+        private static void Bind(Button button, UnityAction action)
+        {
+            if (button != null) button.onClick.AddListener(action);
+        }
+
+        private static void Unbind(Button button, UnityAction action)
+        {
+            if (button != null) button.onClick.RemoveListener(action);
+        }
+
+        private void PauseGame()
+        {
+            if (GameManager.Instance == null) return;
+
+            GameManager.Instance.SetPaused(true);
+            if (pausePanel != null) pausePanel.SetActive(true);
+        }
+
+        private void ResumeGame()
+        {
+            if (GameManager.Instance == null) return;
+
+            GameManager.Instance.SetPaused(false);
+            if (pausePanel != null) pausePanel.SetActive(false);
+        }
+
+        private void BackToMenu()
+        {
+            if (GameManager.Instance != null)
+                GameManager.Instance.GoToMainMenu();
+        }
+
+        private void NextLevel()
+        {
+            if (GameManager.Instance != null)
+                GameManager.Instance.CallLevel();
+        }
+
+        private void CheckBoard()
+        {
+            if (GameManager.Instance != null)
+                GameManager.Instance.FinishRound();
+        }
+
+        private void UseHint()
+        {
+            if (hintManager != null) hintManager.UseOneTileHint();
+        }
+
+        private void UseSecondHint()
+        {
+            if (hintManager != null) hintManager.UseAllTilesHint();
         }
     }
 }

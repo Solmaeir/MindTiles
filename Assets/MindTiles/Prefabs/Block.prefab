@@ -98,7 +98,6 @@ GameObject:
   - component: {fileID: 6412233973756668437}
   - component: {fileID: 8713872106051211996}
   - component: {fileID: -8165243396722730003}
-  - component: {fileID: -3715468863413958879}
   - component: {fileID: -1872456479545806276}
   m_Layer: 0
   m_Name: Block
@@ -175,7 +174,7 @@ SpriteRenderer:
   m_Size: {x: 0.89, y: 0.71}
   m_AdaptiveModeThreshold: 0.5
   m_SpriteTileMode: 0
-  m_WasSpriteAssigned: 1
+  m_WasSpriteAssigned: 0
   m_MaskInteraction: 0
   m_SpriteSortPoint: 0
 --- !u!61 &-8165243396722730003
@@ -224,22 +223,6 @@ BoxCollider2D:
   m_AutoTiling: 0
   m_Size: {x: 1, y: 1}
   m_EdgeRadius: 0
---- !u!114 &-3715468863413958879
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 7606415008270636444}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: d0ae07e4f3499ee43bbfb55c8e371225, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  correctColor: {r: 0, g: 1, b: 0, a: 1}
-  incorrectColor: {r: 1, g: 0, b: 0, a: 1}
-  neutralColor: {r: 1, g: 1, b: 1, a: 1}
-  hintColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
 --- !u!114 &-1872456479545806276
 MonoBehaviour:
   m_ObjectHideFlags: 0

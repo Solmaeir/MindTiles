@@ -7,10 +7,14 @@ namespace MindTiles.UI
     {
         [SerializeField] private GameObject settingsPanel;
         [SerializeField] private GameObject infoPanel;
+        [SerializeField] private MenuExitTransition exitTransition;
 
         public void Play()
         {
-            SceneManager.LoadScene(1);
+            if (exitTransition != null)
+                exitTransition.Begin();
+            else
+                SceneManager.LoadScene(1);
         }
 
         public void InfoButton()

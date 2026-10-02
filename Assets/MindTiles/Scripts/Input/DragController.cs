@@ -3,11 +3,16 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using MindTiles.Grid;
 using MindTiles.Core;
-using MindTiles.Validation;
 
 namespace MindTiles.InputHandling
 {
-    // Eski "Swipe-to-Move" (Kaydır ve Yer Değiştir) mantığına dönüştürülmüş DragController
+    // One gesture handles both control styles:
+    //  - Drag & drop: hold a tile, it follows the pointer, and on release it
+    //    snaps into the nearest cell (swapping with whatever sits there).
+    //  - Swipe: a short flick that doesn't carry the tile into another cell
+    //    still moves it one cell in the dominant direction.
+    // Raycasting happens once per press; while dragging the per-frame work is
+    // just a clamp and a transform write.
     public class DragController : MonoBehaviour
     {
         public static DragController Instance { get; private set; }
@@ -16,12 +21,19 @@ namespace MindTiles.InputHandling
 
         [Header("Movement Settings")]
         [SerializeField] private float moveSpeed = 15f;
-        [SerializeField] private float swipeThreshold = 0.5f; // Sadece tıklamayı elemek için minimum kaydırma mesafesi
+        [Tooltip("Minimum pointer travel (world units) for a release to count as a swipe when the tile stays in its own cell.")]
+        [SerializeField] private float swipeThreshold = 0.5f;
+        [Tooltip("Pointer travel (world units) before a press turns into a drag. Filters out plain taps.")]
+        [SerializeField] private float dragStartThreshold = 0.15f;
 
         private TileController selectedTile;
-        private Vector3 startPointerWorldPos;
-        private bool isSwiping = false;
-        private bool isAnimating = false;
+        private Vector3 pressWorldPos;
+        private Vector3 grabOffset;
+        private Vector3 dragMin;
+        private Vector3 dragMax;
+        private bool isDragging;
+        private bool isAnimating;
+        private Camera cam;
 
         public int MoveCount { get; private set; }
 
@@ -31,6 +43,8 @@ namespace MindTiles.InputHandling
                 Instance = this;
             else
                 Destroy(gameObject);
+
+            cam = Camera.main;
         }
 
         public void ResetMoveCount()
@@ -40,142 +54,174 @@ namespace MindTiles.InputHandling
 
         private void Update()
         {
-            // Oyun kilitliyse, veya bloklar hala kayma animasyonundaysa girdiyi yoksay
-            if (GameManager.Instance != null && GameManager.Instance.inputLocked) return;
-            if (isAnimating) return;
-            if (Pointer.current == null) return;
-
-            // Ekrana/Fereye basıldığı an
-            if (Pointer.current.press.wasPressedThisFrame)
+            // Pause / lock mid-drag: put the tile back and drop the gesture.
+            if (GameManager.Instance != null && !GameManager.Instance.CanAcceptInput)
             {
-                TryBeginSwipe();
+                if (selectedTile != null) CancelSelection();
+                return;
             }
+            if (isAnimating) return;
 
-            // Ekrandan/Fareden parmak çekildiği an
-            if (Pointer.current.press.wasReleasedThisFrame && isSwiping && selectedTile != null)
+            Pointer pointer = Pointer.current;
+            if (pointer == null) return;
+
+            if (pointer.press.wasPressedThisFrame)
             {
-                EndSwipe();
+                TryBeginPress();
+            }
+            else if (selectedTile != null)
+            {
+                if (pointer.press.wasReleasedThisFrame)
+                    EndPress();
+                else if (pointer.press.isPressed)
+                    UpdateDrag();
             }
         }
 
-        private void TryBeginSwipe()
+        private void TryBeginPress()
         {
             Vector3 pointerWorldPos = GetPointerWorldPos();
             RaycastHit2D hit = Physics2D.Raycast(pointerWorldPos, Vector2.zero);
 
-            if (hit.collider != null && hit.collider.CompareTag("Tile"))
-            {
-                selectedTile = hit.collider.GetComponent<TileController>();
-                if (selectedTile != null)
-                {
-                    startPointerWorldPos = pointerWorldPos;
-                    isSwiping = true;
-                }
-            }
+            if (hit.collider == null || !hit.collider.CompareTag("Tile")) return;
+
+            TileController tile = hit.collider.GetComponent<TileController>();
+            if (tile == null) return;
+
+            selectedTile = tile;
+            pressWorldPos = pointerWorldPos;
+            grabOffset = tile.transform.position - pointerWorldPos;
+            isDragging = false;
+
+            // Tile centers can't leave the grid; cached once per press.
+            dragMin = gridManager.GetWorldPositionFromGridCoordinate(Vector2Int.zero);
+            dragMax = gridManager.GetWorldPositionFromGridCoordinate(
+                new Vector2Int(gridManager.GridWidth - 1, gridManager.GridHeight - 1));
         }
 
-        private void EndSwipe()
+        private void UpdateDrag()
         {
-            isSwiping = false;
-            Vector3 endPointerWorldPos = GetPointerWorldPos();
-            Vector3 dragVector = endPointerWorldPos - startPointerWorldPos;
+            Vector3 pointerWorldPos = GetPointerWorldPos();
 
-            // Eğer oyuncu yeterince kaydırmadıysa (sadece tıkladıysa) işlemi iptal et
-            if (dragVector.magnitude < swipeThreshold)
+            if (!isDragging)
             {
-                selectedTile = null;
-                return;
+                if ((pointerWorldPos - pressWorldPos).sqrMagnitude < dragStartThreshold * dragStartThreshold)
+                    return;
+
+                isDragging = true;
+                selectedTile.SetDragging(true);
             }
 
-            Vector2Int moveDir = Vector2Int.zero;
-
-            // Eski scriptindeki mantık: Hangi eksende daha çok kaydırıldıysa o yönü baz al
-            if (Mathf.Abs(dragVector.x) > Mathf.Abs(dragVector.y))
-                moveDir = (dragVector.x > 0) ? Vector2Int.right : Vector2Int.left;
-            else
-                moveDir = (dragVector.y > 0) ? Vector2Int.up : Vector2Int.down;
-
-            Vector2Int originGridPos = selectedTile.CurrentGridPos;
-            Vector2Int targetGridPos = originGridPos + moveDir;
-
-            // Hedef pozisyon Grid (ızgara) sınırları içerisinde mi? (Dışarı sürüklenmeyi engeller)
-            if (targetGridPos.x >= 0 && targetGridPos.x < gridManager.GridWidth &&
-                targetGridPos.y >= 0 && targetGridPos.y < gridManager.GridHeight)
-            {
-                // Geçerli hamle, Swap ve Animasyon işlemini başlat
-                StartCoroutine(SwapAndAnimate(selectedTile, originGridPos, targetGridPos));
-            }
-            else
-            {
-                // Sınır dışına itilmeye çalışıldıysa iptal et
-                selectedTile = null;
-            }
+            Vector3 target = pointerWorldPos + grabOffset;
+            target.x = Mathf.Clamp(target.x, dragMin.x, dragMax.x);
+            target.y = Mathf.Clamp(target.y, dragMin.y, dragMax.y);
+            target.z = 0f;
+            selectedTile.transform.position = target;
         }
 
-        private IEnumerator SwapAndAnimate(TileController tile1, Vector2Int originPos, Vector2Int targetPos)
+        private void EndPress()
+        {
+            TileController tile = selectedTile;
+            bool wasDragging = isDragging;
+            Vector3 dragVector = GetPointerWorldPos() - pressWorldPos;
+
+            selectedTile = null;
+            isDragging = false;
+
+            // Plain tap: nothing to do.
+            if (!wasDragging) return;
+
+            tile.SetDragging(false);
+
+            Vector3 dropPos = tile.transform.position;
+            Vector2Int origin = tile.CurrentGridPos;
+            Vector2Int target = gridManager.GetNearestGridCoordinate(dropPos);
+
+            // Dropped back in its own cell but flicked far enough: treat as a swipe.
+            if (target == origin && dragVector.magnitude >= swipeThreshold)
+            {
+                Vector2Int dir = Mathf.Abs(dragVector.x) > Mathf.Abs(dragVector.y)
+                    ? (dragVector.x > 0 ? Vector2Int.right : Vector2Int.left)
+                    : (dragVector.y > 0 ? Vector2Int.up : Vector2Int.down);
+
+                Vector2Int swipeTarget = origin + dir;
+                if (swipeTarget.x >= 0 && swipeTarget.x < gridManager.GridWidth &&
+                    swipeTarget.y >= 0 && swipeTarget.y < gridManager.GridHeight)
+                    target = swipeTarget;
+            }
+
+            StartCoroutine(SettleTile(tile, target, dropPos));
+        }
+
+        // Drops an in-progress drag and puts the tile back (pause, screen rotation...).
+        public void CancelSelection()
+        {
+            if (isDragging)
+            {
+                selectedTile.SetDragging(false);
+                selectedTile.transform.position = gridManager.GetWorldPositionFromGridCoordinate(selectedTile.CurrentGridPos);
+            }
+            selectedTile = null;
+            isDragging = false;
+        }
+
+        // Moves the tile from where the player let go into its target cell
+        // (swapping with the occupant if any). If target == origin the tile
+        // just slides back and no move is counted.
+        private IEnumerator SettleTile(TileController tile, Vector2Int target, Vector3 dropPos)
         {
             isAnimating = true;
 
-            // 1. GridManager üzerinden mantıksal swap işlemini yap ve verileri güncelle
-            TileController tile2 = gridManager.MoveTile(tile1, targetPos);
-            MoveCount++;
+            Vector2Int origin = tile.CurrentGridPos;
+            Vector3 tile1End = gridManager.GetWorldPositionFromGridCoordinate(target);
+            TileController tile2 = null;
+            Vector3 tile2Start = Vector3.zero;
+            Vector3 tile2End = Vector3.zero;
 
-            // Not: GridManager.MoveTile pozisyonları "anında" değiştirir. 
-            // Eski scriptindeki animasyonu verebilmek için pozisyonları alıp bir süreliğine Lerp ile kaydıracağız.
-            Vector3 tile1Start = gridManager.GetWorldPositionFromGridCoordinate(originPos);
-            Vector3 tile1End = gridManager.GetWorldPositionFromGridCoordinate(targetPos);
-
-            // Animasyon öncesi başlangıç konumuna geri çek
-            tile1.transform.position = tile1Start;
-
-            Vector3 tile2Start = tile1End;
-            Vector3 tile2End = tile1Start;
-
-            if (tile2 != null)
+            if (target != origin)
             {
-                tile2.transform.position = tile2Start;
+                // Logical swap happens now; visuals catch up in the loop below.
+                tile2 = gridManager.MoveTile(tile, target);
+                MoveCount++;
+
+                tile2Start = tile1End;
+                tile2End = gridManager.GetWorldPositionFromGridCoordinate(origin);
             }
 
-            // 2. Blokların yeni yerlerine doğru pürüzsüzce kayması
-            float t = 0;
+            Vector3 tile1Start = dropPos;
+            tile.transform.position = tile1Start;
+            if (tile2 != null) tile2.transform.position = tile2Start;
+
+            float t = 0f;
             while (t < 1f)
             {
                 t += Time.deltaTime * moveSpeed;
                 float step = Mathf.Clamp01(t);
 
-                tile1.transform.position = Vector3.Lerp(tile1Start, tile1End, step);
+                // Ends are re-read every frame so a screen rotation mid-animation can't leave tiles at stale positions.
+                tile1End = gridManager.GetWorldPositionFromGridCoordinate(tile.CurrentGridPos);
+                tile.transform.position = Vector3.Lerp(tile1Start, tile1End, step);
                 if (tile2 != null)
                 {
+                    tile2End = gridManager.GetWorldPositionFromGridCoordinate(tile2.CurrentGridPos);
                     tile2.transform.position = Vector3.Lerp(tile2Start, tile2End, step);
                 }
 
                 yield return null;
             }
 
-            // Tam oturduğundan emin olmak için kesin eşitleme
-            tile1.transform.position = tile1End;
-            if (tile2 != null) tile2.transform.position = tile2End;
+            tile.transform.position = gridManager.GetWorldPositionFromGridCoordinate(tile.CurrentGridPos);
+            if (tile2 != null)
+                tile2.transform.position = gridManager.GetWorldPositionFromGridCoordinate(tile2.CurrentGridPos);
 
-            // 3. PatternValidator doğruluk kontrolü (Eski kodundaki Highlight mantığı)
-            var validator = PatternValidator.Instance;
-            if (validator != null)
-            {
-                tile1.GetComponent<TileHighlight>()?.SetCorrect(validator.IsPositionCorrect(targetPos));
-                if (tile2 != null)
-                {
-                    tile2.GetComponent<TileHighlight>()?.SetCorrect(validator.IsPositionCorrect(originPos));
-                }
-            }
-
-            selectedTile = null;
             isAnimating = false;
         }
 
         private Vector3 GetPointerWorldPos()
         {
             Vector3 screenPos = Pointer.current.position.ReadValue();
-            screenPos.z = -Camera.main.transform.position.z;
-            return Camera.main.ScreenToWorldPoint(screenPos);
+            screenPos.z = -cam.transform.position.z;
+            return cam.ScreenToWorldPoint(screenPos);
         }
     }
 }

@@ -7,6 +7,15 @@ namespace MindTiles.Grid
     // Owns the grid geometry (size, cell size, world<->grid conversion) and
     // the occupancy map (which tile sits in which cell). Spawns tiles for a
     // given level according to the difficulty curve.
+    //
+    // The board panel (gridBoundaryPanel) is the single source of truth for
+    // layout: cell size, tile scale, grid center, grid lines and the result
+    // overlay are all derived from its on-screen rect in ApplyLayout(). A cheap
+    // per-frame check re-runs ApplyLayout() whenever that rect changes (screen
+    // rotation, safe area edits, board resizing...), so nothing can drift.
+    // Grid dimensions (columns x rows) stay fixed for the level, so game state
+    // is never touched by a re-layout.
+    [DefaultExecutionOrder(-50)]
     public class GridManager : MonoBehaviour
     {
         [Header("Prefabs")]
@@ -21,6 +30,12 @@ namespace MindTiles.Grid
         [SerializeField] private RectTransform gridBoundaryPanel; // Sınırları belirleyecek UI Paneli
         [SerializeField] private Camera mainCamera; // Ekran-Dünya dönüşümü için kamera
 
+        [Tooltip("Sizes the board to the level's grid shape. Optional: without it the grid is derived from the board as it is.")]
+        [SerializeField] private MindTiles.UI.BoardFitter boardFitter;
+
+        [Header("Visuals")]
+        [SerializeField] private GridLinesRenderer gridLines;
+
         [Header("Scale Settings")]
         [SerializeField] private float easyScale = 0.8f;
         [SerializeField] private float intermediateScale = 0.6f;
@@ -28,11 +43,23 @@ namespace MindTiles.Grid
 
         private int gridWidth;
         private int gridHeight;
+        // Per-level design values (cell size and tile scale at the design cell size).
+        private float levelCellSize;
+        private float levelTileScale;
+        // Board rect (world center xy, world size zw) the layout was last built for.
+        private Vector4 lastBoardRect;
+        private bool hasLayout;
+        private readonly Vector3[] boardCorners = new Vector3[4];
         private readonly Dictionary<Vector2Int, TileController> occupancy = new Dictionary<Vector2Int, TileController>();
 
         public float CurrentCellSize { get; private set; }
         public int GridWidth => gridWidth;
         public int GridHeight => gridHeight;
+
+        // Raised after the layout was recomputed because the board changed.
+        public event System.Action LayoutChanged;
+
+        private float CurrentTileScale => levelTileScale * CurrentCellSize / levelCellSize;
 
         public void GenerateTiles(int currentLevel)
         {
@@ -68,8 +95,12 @@ namespace MindTiles.Grid
                 scale = hardScale;
             }
 
-            // 2. UI PANELİNE GÖRE DİNAMİK IZGARA BOYUTUNU HESAPLA
-            CalculateDynamicGridSize();
+            levelCellSize = CurrentCellSize;
+            levelTileScale = scale;
+
+            // 2. IZGARA BOYUTUNU PANELDEN HESAPLA, SONRA HÜCRE BOYUTUNU PANELE SIĞDIR
+            CalculateGridDimensions();
+            ApplyLayout();
 
             // 3. RASTGELE YERLEŞTİRME (Mevcut mantık)
             List<Vector2Int> availablePositions = GetAllGridPositions();
@@ -96,7 +127,7 @@ namespace MindTiles.Grid
 
                 Vector3 worldPos = GetWorldPositionFromGridCoordinate(gridPos);
                 GameObject tileObj = Instantiate(prefabToSpawn, worldPos, Quaternion.identity);
-                tileObj.transform.localScale = Vector3.one * scale;
+                tileObj.transform.localScale = Vector3.one * CurrentTileScale;
                 tileObj.name = $"Tile_{gridPos.x}_{gridPos.y}";
 
                 TileController tile = tileObj.GetComponent<TileController>();
@@ -108,8 +139,32 @@ namespace MindTiles.Grid
                 GameManager.Instance.RegisterTile(tileObj, tile);
             }
         }
-        private void CalculateDynamicGridSize()
+        // Board rect in world space: xy = center, zw = size. Uses the world
+        // corners, so pivot, parent scale and non-uniform scale are all handled.
+        private Vector4 ReadBoardRect()
         {
+            gridBoundaryPanel.GetWorldCorners(boardCorners);
+            Vector3 min = boardCorners[0];
+            Vector3 max = boardCorners[2];
+            return new Vector4((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f, max.x - min.x, max.y - min.y);
+        }
+
+        // Smallest cell size, as a fraction of the level's design cell size, the solver will accept.
+        private const float MinCellRatio = 0.8f;
+
+        // Columns x rows for this level. With a BoardFitter the grid is chosen
+        // to fill the free screen area as fully as possible (cells stay square
+        // and close to the level's design size) and the board is then resized
+        // to exactly that shape. Without one, it is derived from the board.
+        private void CalculateGridDimensions()
+        {
+            if (boardFitter != null && boardFitter.TryGetAvailableArea(out Vector4 area))
+            {
+                SolveGrid(area.z, area.w, out gridWidth, out gridHeight);
+                boardFitter.SetGrid(gridWidth, gridHeight);
+                return;
+            }
+
             if (gridBoundaryPanel == null)
             {
                 gridWidth = 4;
@@ -117,20 +172,84 @@ namespace MindTiles.Grid
                 return;
             }
 
-            // 1. Panelin dünyadaki (World Space) gerçek boyutlarını kameradan bağımsız hesapla
-            float worldWidth = gridBoundaryPanel.rect.width * gridBoundaryPanel.lossyScale.x;
-            float worldHeight = gridBoundaryPanel.rect.height * gridBoundaryPanel.lossyScale.y;
-
-            // 2. Kapasiteyi hesapla (Crash olmaması için Mathf.Max ile minimum 1'de tutuyoruz)
-            gridWidth = Mathf.Max(1, Mathf.FloorToInt(worldWidth / CurrentCellSize));
-            gridHeight = Mathf.Max(1, Mathf.FloorToInt(worldHeight / CurrentCellSize));
-
-            // 3. GridManager'ı panelin tam merkezine hizala
-            transform.position = new Vector3(gridBoundaryPanel.position.x, gridBoundaryPanel.position.y, 0f);
-
-            Debug.Log($"[GridManager] Panel Dünya Boyutu: {worldWidth} x {worldHeight} | Hücre Boyutu: {CurrentCellSize} | Çıkan Grid: {gridWidth}x{gridHeight}");
+            Vector4 board = ReadBoardRect();
+            gridWidth = Mathf.Max(1, Mathf.FloorToInt(board.z / levelCellSize));
+            gridHeight = Mathf.Max(1, Mathf.FloorToInt(board.w / levelCellSize));
         }
 
+        // Tries rounding each axis down or up and keeps the combination whose
+        // square-cell grid covers the most of the area (cell = tighter axis).
+        private void SolveGrid(float areaWidth, float areaHeight, out int columns, out int rows)
+        {
+            int baseCols = Mathf.Max(1, Mathf.FloorToInt(areaWidth / levelCellSize));
+            int baseRows = Mathf.Max(1, Mathf.FloorToInt(areaHeight / levelCellSize));
+
+            columns = baseCols;
+            rows = baseRows;
+            float bestCovered = -1f;
+
+            for (int c = baseCols; c <= baseCols + 1; c++)
+            {
+                for (int r = baseRows; r <= baseRows + 1; r++)
+                {
+                    float cell = Mathf.Min(areaWidth / c, areaHeight / r);
+                    if (cell < levelCellSize * MinCellRatio) continue;
+
+                    float covered = c * r * cell * cell;
+                    if (covered > bestCovered)
+                    {
+                        bestCovered = covered;
+                        columns = c;
+                        rows = r;
+                    }
+                }
+            }
+        }
+
+        // The one place layout is computed. Fits the (fixed) grid to the board:
+        // cell size, grid center, tile scale/positions and the grid lines all
+        // follow from the board rect.
+        private void ApplyLayout()
+        {
+            if (gridBoundaryPanel != null)
+            {
+                Vector4 board = ReadBoardRect();
+                if (board.z <= 0f || board.w <= 0f) return;
+
+                lastBoardRect = board;
+                CurrentCellSize = Mathf.Min(board.z / gridWidth, board.w / gridHeight);
+                transform.position = new Vector3(board.x, board.y, 0f);
+            }
+            else
+            {
+                CurrentCellSize = levelCellSize;
+            }
+            hasLayout = true;
+
+            float tileScale = CurrentTileScale;
+            foreach (var entry in occupancy)
+            {
+                Transform t = entry.Value.transform;
+                t.position = GetWorldPositionFromGridCoordinate(entry.Key);
+                t.localScale = Vector3.one * tileScale;
+            }
+
+            if (gridLines != null)
+                gridLines.Rebuild(gridWidth, gridHeight, CurrentCellSize, transform.position);
+        }
+
+        // Cheap change detection: four floats compared per frame; the layout
+        // work only happens when the board actually moved or resized.
+        private void LateUpdate()
+        {
+            if (!hasLayout || gridBoundaryPanel == null) return;
+
+            Vector4 board = ReadBoardRect();
+            if ((board - lastBoardRect).sqrMagnitude < 1e-8f) return;
+
+            ApplyLayout();
+            LayoutChanged?.Invoke();
+        }
 
         public Vector3 GetWorldPositionFromGridCoordinate(Vector2Int gridCoordinate)
         {

@@ -4,10 +4,20 @@ using UnityEngine;
 using MindTiles.Core;
 using MindTiles.Grid;
 using MindTiles.InputHandling;
-using MindTiles.Score;
 
 namespace MindTiles.Validation
 {
+    public enum MarkKind { Correct, WrongTile, Destination }
+
+    // One colored cell in the round-end reveal. WrongTile and Destination
+    // that share a pairId belong together: that tile should end up there.
+    public struct CellMark
+    {
+        public Vector2Int cell;
+        public MarkKind kind;
+        public int pairId;
+    }
+
     // Validates by TYPE-at-position, not by tile instance: two tiles spawned
     // from the same prefab look identical to the player, so either one
     // sitting in a given cell should count as correct for that cell.
@@ -21,13 +31,9 @@ namespace MindTiles.Validation
 
         [SerializeField] private GridManager gridManager;
         [SerializeField] private TextMeshProUGUI finishText;
-        [SerializeField] private TextMeshProUGUI headText;
-        [SerializeField] private GameObject resultPanel;
 
         private readonly Dictionary<Vector2Int, int> expectedTypeByPosition = new Dictionary<Vector2Int, int>();
         private List<TileController> tiles = new List<TileController>();
-        private float roundStartTime;
-        private float roundTimeLimit;
 
         private void Awake()
         {
@@ -37,11 +43,9 @@ namespace MindTiles.Validation
                 Destroy(gameObject);
         }
 
-        public void BeginRound(List<TileController> roundTiles, float timeLimitSeconds)
+        public void BeginRound(List<TileController> roundTiles)
         {
             tiles = roundTiles;
-            roundStartTime = Time.time;
-            roundTimeLimit = timeLimitSeconds;
 
             expectedTypeByPosition.Clear();
             foreach (var tile in tiles)
@@ -86,28 +90,74 @@ namespace MindTiles.Validation
             return null;
         }
 
-        // Call when the player presses "Check" (or the round timer runs out).
-        public void CheckAndFinishRound()
+        // Adds a Correct mark for every tile currently sitting where it belongs.
+        public void AppendCorrectMarks(List<CellMark> marks)
+        {
+            foreach (var tile in tiles)
+                if (IsPositionCorrect(tile.CurrentGridPos))
+                    marks.Add(new CellMark { cell = tile.CurrentGridPos, kind = MarkKind.Correct, pairId = -1 });
+        }
+
+        // Finds a cell this tile's type belongs in that isn't correctly filled yet.
+        public bool TryGetHintTarget(TileController tile, out Vector2Int target)
+        {
+            foreach (var entry in expectedTypeByPosition)
+            {
+                if (entry.Value != tile.TileTypeId || IsPositionCorrect(entry.Key)) continue;
+                target = entry.Key;
+                return true;
+            }
+
+            target = default;
+            return false;
+        }
+
+        // Fills in the result text and returns how many tiles are correct.
+        // Turning that into points is GameManager's job.
+        public int EvaluateRound()
         {
             int correct = CountCorrectTiles();
             int total = expectedTypeByPosition.Count;
-            float timeTaken = Time.time - roundStartTime;
-            int moveCount = DragController.Instance != null ? DragController.Instance.MoveCount : 0;
 
-            float roundScore = ScoreCalculator.CalculateRoundScore(correct, total, timeTaken, roundTimeLimit, moveCount);
-            ScoreManager.Instance?.AddRoundScore(roundScore);
-
-            bool success = correct == total;
             if (finishText != null)
-                finishText.text = success ? "Başarılı!" : $"{correct}/{total} doğru";
-            if (headText != null)
-                headText.text = "Bölüm Bitti";
+                finishText.text = correct == total ? "Perfect!" : $"{correct}/{total} correct";
 
-            GameManager.Instance.inputLocked = true;
-            if (resultPanel != null)
-                resultPanel.SetActive(true);
+            return correct;
+        }
 
-            MindTiles.UI.UIManager.Instance?.RefreshScoreTexts();
+        // Fills `marks` with the round-end reveal: correct cells, plus for
+        // every misplaced tile the cell it belongs in. Pairing is by tile
+        // type (identical-looking tiles are interchangeable), and since the
+        // tile set never changes, every misplaced tile finds exactly one cell.
+        public void CollectMarks(List<CellMark> marks)
+        {
+            marks.Clear();
+            var wrongByType = new Dictionary<int, Queue<TileController>>();
+
+            foreach (var tile in tiles)
+            {
+                if (IsPositionCorrect(tile.CurrentGridPos))
+                {
+                    marks.Add(new CellMark { cell = tile.CurrentGridPos, kind = MarkKind.Correct, pairId = -1 });
+                    continue;
+                }
+
+                if (!wrongByType.TryGetValue(tile.TileTypeId, out var queue))
+                    wrongByType[tile.TileTypeId] = queue = new Queue<TileController>();
+                queue.Enqueue(tile);
+            }
+
+            int pairId = 0;
+            foreach (var entry in expectedTypeByPosition)
+            {
+                if (IsPositionCorrect(entry.Key)) continue;
+                if (!wrongByType.TryGetValue(entry.Value, out var queue) || queue.Count == 0) continue;
+
+                TileController wrongTile = queue.Dequeue();
+                marks.Add(new CellMark { cell = wrongTile.CurrentGridPos, kind = MarkKind.WrongTile, pairId = pairId });
+                marks.Add(new CellMark { cell = entry.Key, kind = MarkKind.Destination, pairId = pairId });
+                pairId++;
+            }
         }
 
         public void Reinitialize(List<TileController> newTiles)

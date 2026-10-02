@@ -1,15 +1,18 @@
 using TMPro;
 using UnityEngine;
+using MindTiles.Core;
 
 namespace MindTiles.UI
 {
+    // Text readouts only: level, current score and highest score. The numbers
+    // come from GameManager (current score = this run, highest = saved best).
     public class UIManager : MonoBehaviour
     {
         public static UIManager Instance { get; private set; }
 
         [SerializeField] private TextMeshProUGUI levelText;
-        [SerializeField] private TextMeshProUGUI overallScoreText;
-        [SerializeField] private TextMeshProUGUI dailyScoreText;
+        [SerializeField] private TextMeshProUGUI currentScoreText;
+        [SerializeField] private TextMeshProUGUI highestScoreText;
 
         private void Awake()
         {
@@ -17,6 +20,11 @@ namespace MindTiles.UI
                 Instance = this;
             else
                 Destroy(gameObject);
+        }
+
+        private void Start()
+        {
+            RefreshScoreTexts();
         }
 
         public void UpdateLevelText(string level)
@@ -27,14 +35,14 @@ namespace MindTiles.UI
 
         public void RefreshScoreTexts()
         {
-            var scoreManager = Score.ScoreManager.Instance;
-            if (scoreManager == null) return;
+            GameManager gm = GameManager.Instance;
+            if (gm == null) return;
 
-            if (overallScoreText != null)
-                overallScoreText.text = "TOTAL " + Mathf.RoundToInt(scoreManager.GetOverallScore());
+            if (currentScoreText != null)
+                currentScoreText.text = "Score: " + gm.SessionScore.ToString("D3");
 
-            if (dailyScoreText != null)
-                dailyScoreText.text = "TODAY " + Mathf.RoundToInt(scoreManager.GetDailyScore(System.DateTime.Now));
+            if (highestScoreText != null)
+                highestScoreText.text = "Highest Score: " + gm.HighScore.ToString("D3");
         }
     }
 }

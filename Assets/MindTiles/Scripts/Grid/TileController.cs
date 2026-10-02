@@ -15,6 +15,11 @@ namespace MindTiles.Grid
         public Vector2Int CurrentGridPos { get; private set; }
         public int TileTypeId { get; private set; }
 
+        private const int DragSortingBoost = 100;
+        private SpriteRenderer sr;
+        private int baseSortingOrder;
+        private bool isDragging;
+
         public void Initialize(Vector2Int originalGridPos, int tileTypeId)
         {
             OriginalGridPos = originalGridPos;
@@ -25,6 +30,24 @@ namespace MindTiles.Grid
         public void SetCurrentGridPos(Vector2Int gridPos)
         {
             CurrentGridPos = gridPos;
+        }
+
+        // Lifts the tile above its neighbours while the player holds it.
+        public void SetDragging(bool dragging)
+        {
+            if (sr == null) sr = GetComponent<SpriteRenderer>();
+            if (sr == null || dragging == isDragging) return;
+
+            isDragging = dragging;
+            if (dragging)
+            {
+                baseSortingOrder = sr.sortingOrder;
+                sr.sortingOrder = baseSortingOrder + DragSortingBoost;
+            }
+            else
+            {
+                sr.sortingOrder = baseSortingOrder;
+            }
         }
     }
 }
