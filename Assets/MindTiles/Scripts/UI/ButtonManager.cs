@@ -26,6 +26,11 @@ namespace MindTiles.UI
         [SerializeField] private TMP_Text hintCountText;
         [SerializeField] private TMP_Text secondHintCountText;
 
+        [Header("Pause Panel Buttons")]
+        [SerializeField] private Button pauseMenuButton;
+        [SerializeField] private Button pauseResetButton;
+        [SerializeField] private ConfirmDialog confirmDialog;
+
         [Header("Result Panel Buttons")]
         [SerializeField] private Button nextLevelButton;
         [SerializeField] private Button endMenuButton;
@@ -46,6 +51,8 @@ namespace MindTiles.UI
             Bind(secondHintButton, UseSecondHint);
             Bind(nextLevelButton, NextLevel);
             Bind(endMenuButton, BackToMenu);
+            Bind(pauseMenuButton, BackToMenu);
+            Bind(pauseResetButton, AskResetProgress);
 
             GameManager.RoundFinished += HideRoundButtons;
             GameManager.RoundStarted += ShowRoundButtons;
@@ -63,6 +70,8 @@ namespace MindTiles.UI
             Unbind(secondHintButton, UseSecondHint);
             Unbind(nextLevelButton, NextLevel);
             Unbind(endMenuButton, BackToMenu);
+            Unbind(pauseMenuButton, BackToMenu);
+            Unbind(pauseResetButton, AskResetProgress);
 
             GameManager.RoundFinished -= HideRoundButtons;
             GameManager.RoundStarted -= ShowRoundButtons;
@@ -131,6 +140,14 @@ namespace MindTiles.UI
         {
             if (GameManager.Instance != null)
                 GameManager.Instance.GoToMainMenu();
+        }
+
+        private void AskResetProgress()
+        {
+            if (confirmDialog == null || GameManager.Instance == null) return;
+
+            confirmDialog.Show("Reset your score and progress?\nThis can't be undone.",
+                GameManager.Instance.ResetProgressAndRestart);
         }
 
         private void NextLevel()

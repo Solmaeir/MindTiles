@@ -43,6 +43,8 @@ namespace MindTiles.Validation
                 Destroy(gameObject);
         }
 
+        public int TotalTiles => expectedTypeByPosition.Count;
+
         public void BeginRound(List<TileController> roundTiles)
         {
             tiles = roundTiles;

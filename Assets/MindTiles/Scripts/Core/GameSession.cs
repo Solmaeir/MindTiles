@@ -6,6 +6,11 @@ namespace MindTiles.Core
     // belongs in SaveData instead.
     public static class GameSession
     {
+        // Daily Streak score of this app run.
         public static int Score;
+
+        // Chosen in the menu before the game scene loads. Defaults to Daily
+        // Streak so starting the game scene directly in the editor still works.
+        public static GameMode Mode = GameMode.DailyStreak;
     }
 }

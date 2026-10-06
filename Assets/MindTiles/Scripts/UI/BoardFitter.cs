@@ -29,6 +29,8 @@ namespace MindTiles.UI
         [SerializeField] private float sideMargin = 48f;
         [SerializeField] private float topGap = 24f;
         [SerializeField] private float bottomGap = 12f;
+        [Tooltip("Space inside the board around the grid, so tiles and marks never touch the board frame.")]
+        [SerializeField, Min(0f)] private float innerPadding = 14f;
 
         [Header("Placement")]
         [Tooltip("Where the board sits in leftover vertical space: 1 = against the header, 0 = against the bottom panel, 0.5 = centered.")]
@@ -53,6 +55,9 @@ namespace MindTiles.UI
             Fit();
         }
 
+        // Inner padding in world units (GridManager keeps the grid this far inside the board).
+        public float PaddingWorld => areaRoot != null ? innerPadding * areaRoot.lossyScale.x : 0f;
+
         // The free area in world space (x = left, y = bottom, z = width, w = height).
         public bool TryGetAvailableArea(out Vector4 area)
         {
@@ -72,7 +77,8 @@ namespace MindTiles.UI
             {
                 for (int i = 0; i < topReferences.Length; i++)
                 {
-                    if (topReferences[i] == null) continue;
+                    // Hidden headers (the other mode's) don't take space.
+                    if (topReferences[i] == null || !topReferences[i].gameObject.activeInHierarchy) continue;
                     topReferences[i].GetWorldCorners(corners);
                     top = Mathf.Min(top, corners[0].y);
                 }
@@ -119,10 +125,11 @@ namespace MindTiles.UI
 
             if (gridColumns > 0 && gridRows > 0)
             {
-                // Square cells: the tighter axis decides the cell size, the board is exactly the grid.
-                float cell = Mathf.Min(area.z / gridColumns, area.w / gridRows);
-                width = cell * gridColumns;
-                height = cell * gridRows;
+                // Square cells: the tighter axis decides the cell size; the board is the grid plus padding.
+                float pad = PaddingWorld;
+                float cell = Mathf.Min((area.z - 2f * pad) / gridColumns, (area.w - 2f * pad) / gridRows);
+                width = cell * gridColumns + 2f * pad;
+                height = cell * gridRows + 2f * pad;
                 left = area.x + (area.z - width) * 0.5f;
                 bottom = area.y + (area.w - height) * (1f - verticalAlignment);
             }

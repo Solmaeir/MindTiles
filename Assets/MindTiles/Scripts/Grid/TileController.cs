@@ -14,17 +14,20 @@ namespace MindTiles.Grid
         public Vector2Int OriginalGridPos { get; private set; }
         public Vector2Int CurrentGridPos { get; private set; }
         public int TileTypeId { get; private set; }
+        // Tile scale per world unit of cell size (set by GridManager; tiers differ).
+        public float ScalePerCell { get; private set; } = 1f;
 
         private const int DragSortingBoost = 100;
         private SpriteRenderer sr;
         private int baseSortingOrder;
         private bool isDragging;
 
-        public void Initialize(Vector2Int originalGridPos, int tileTypeId)
+        public void Initialize(Vector2Int originalGridPos, int tileTypeId, float scalePerCell)
         {
             OriginalGridPos = originalGridPos;
             CurrentGridPos = originalGridPos;
             TileTypeId = tileTypeId;
+            ScalePerCell = scalePerCell;
         }
 
         public void SetCurrentGridPos(Vector2Int gridPos)

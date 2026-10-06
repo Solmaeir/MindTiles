@@ -26,6 +26,8 @@ namespace MindTiles.Core
         [SerializeField] private CountdownPanel countdownPanel;
         [SerializeField] private GameObject endPanel;
         [SerializeField] private RoundResultOverlay resultOverlay;
+        [Tooltip("Difficulty director for Endless mode.")]
+        [SerializeField] private EndlessDifficulty endless;
 
         [Header("Save Defaults")]
         [Tooltip("Hints granted once, when there is no save file yet. Changing these does not affect existing saves (use the context menu to reset).")]
@@ -61,7 +63,10 @@ namespace MindTiles.Core
             {
                 Instance = this;
                 GrantStartingHintsOnce();
-                RestoreSavedLevel();
+                if (Mode == GameMode.Endless && endless == null)
+                    Debug.LogError("[GameManager] Endless mode was chosen but no EndlessDifficulty is assigned; running Daily Streak instead.");
+                if (!IsEndless)
+                    RestoreSavedLevel();
             }
             else
                 Destroy(gameObject);
@@ -77,6 +82,39 @@ namespace MindTiles.Core
         public int SessionScore => GameSession.Score;
         public int HighScore => SaveSystem.Data.highScore;
         public int CurrentLevel => currentLevel;
+
+        // ---- Game mode ---------------------------------------------------------
+        // Picked in the menu (GameSession.Mode). Daily Streak = fixed 10-level run;
+        // Endless = adaptive difficulty driven by EndlessDifficulty.
+        public GameMode Mode => GameSession.Mode;
+        public bool IsEndless => Mode == GameMode.Endless && endless != null;
+        public int DisplayLevel => IsEndless ? endless.Level : currentLevel;
+        public int EndlessTotalScore => IsEndless ? endless.TotalScore : 0;
+        // Points earned by the last checked level (shown on the end panel).
+        public int LastLevelPoints { get; private set; }
+
+        // ---- Level timer (Endless) --------------------------------------------
+        // Starts when the tiles are scrambled; when it hits zero the level is
+        // checked automatically. Pausing freezes it (scaled time).
+        private bool timerRunning;
+        private float timeLimit;
+        private float timeRemaining;
+
+        private void Update()
+        {
+            if (!timerRunning) return;
+
+            timeRemaining -= Time.deltaTime;
+            if (timeRemaining <= 0f)
+            {
+                timeRemaining = 0f;
+                timerRunning = false;
+                UIManager.Instance?.UpdateTimer(timeRemaining);
+                FinishRound();
+                return;
+            }
+            UIManager.Instance?.UpdateTimer(timeRemaining);
+        }
 
         private void AddScore(int amount)
         {
@@ -196,8 +234,69 @@ namespace MindTiles.Core
             if (endPanel != null)
                 endPanel.SetActive(false);
 
-            gridManager.GenerateTiles(currentLevel);
-            StartCoroutine(ScrambleAfterDelay(baseMemorizeTime));
+            UIManager.Instance?.ConfigureForMode(IsEndless);
+            StartCoroutine(StartWhenLayoutSettled());
+        }
+
+        // The first frames after Play can run at a different screen size (device
+        // simulator, window resize) with the canvas not scaled yet. The grid is
+        // chosen from the board's size, so building it then gives a wrong grid.
+        // Wait until the screen size has stayed the same for a few frames.
+        private IEnumerator StartWhenLayoutSettled()
+        {
+            const int StableFramesNeeded = 3;
+            const float MaxWaitSeconds = 1f;
+
+            var last = new Vector2Int(Screen.width, Screen.height);
+            var first = last;
+            int stable = 0;
+            float waited = 0f;
+
+            while (stable < StableFramesNeeded && waited < MaxWaitSeconds)
+            {
+                yield return null;
+                waited += Time.unscaledDeltaTime;
+
+                var now = new Vector2Int(Screen.width, Screen.height);
+                if (now == last) stable++;
+                else { stable = 0; last = now; }
+            }
+
+            if (last != first)
+                Debug.Log($"[GameManager] Screen changed {first} -> {last} while starting; level built after it settled.");
+
+            Canvas.ForceUpdateCanvases();
+            StartLevel();
+        }
+
+        // Builds the current level for the active mode and starts the memorize countdown.
+        private void StartLevel()
+        {
+            float memorizeSeconds;
+            if (IsEndless)
+            {
+                LevelSpec spec = endless.CurrentSpec();
+                gridManager.GenerateTiles(spec);
+                memorizeSeconds = spec.memorizeSeconds;
+                timeLimit = spec.timeLimitSeconds;
+                timeRemaining = timeLimit;
+                UIManager.Instance?.UpdateTimer(timeRemaining);
+            }
+            else
+            {
+                gridManager.GenerateTiles(currentLevel);
+                memorizeSeconds = DailyMemorizeTime(currentLevel);
+            }
+
+            UIManager.Instance?.UpdateLevelText(DisplayLevel.ToString());
+            UIManager.Instance?.RefreshScoreTexts();
+            StartCoroutine(ScrambleAfterDelay(memorizeSeconds));
+        }
+
+        // Daily Streak: 3 s on level 1, then base + level number.
+        private float DailyMemorizeTime(int level)
+        {
+            return level <= 1 ? baseMemorizeTime : baseMemorizeTime + level;
         }
 
         public void RegisterTile(GameObject tileObj, TileController tile)
@@ -222,8 +321,7 @@ namespace MindTiles.Core
 
             ScrambleTiles();
             inputLocked = false;
-
-            UIManager.Instance?.UpdateLevelText(currentLevel.ToString());
+            timerRunning = IsEndless;
 
             PatternValidator.Instance?.BeginRound(new List<TileController>(placedTiles));
         }
@@ -251,6 +349,7 @@ namespace MindTiles.Core
             if (!CanAcceptInput || PatternValidator.Instance == null) return;
 
             inputLocked = true;
+            timerRunning = false;
             RoundFinished?.Invoke();
             StartCoroutine(FinishRoundRoutine());
         }
@@ -259,7 +358,18 @@ namespace MindTiles.Core
         {
             PatternValidator validator = PatternValidator.Instance;
             int correct = validator.EvaluateRound();
-            AddScore(correct * pointsPerCorrectTile);
+
+            if (IsEndless)
+            {
+                LastLevelPoints = endless.RecordLevel(correct, validator.TotalTiles,
+                    timeLimit - timeRemaining, timeLimit, pointsPerCorrectTile);
+            }
+            else
+            {
+                LastLevelPoints = correct * pointsPerCorrectTile;
+                AddScore(LastLevelPoints);
+            }
+
             UIManager.Instance?.RefreshScoreTexts();
 
             if (resultOverlay != null)
@@ -293,6 +403,13 @@ namespace MindTiles.Core
 
             yield return null;
 
+            // Endless already advanced its level (and difficulty) when the result was recorded.
+            if (IsEndless)
+            {
+                StartLevel();
+                yield break;
+            }
+
             if (currentLevel < MaxLevel)
                 currentLevel++;
 
@@ -303,8 +420,7 @@ namespace MindTiles.Core
             }
 
             SaveLevel(currentLevel);
-            gridManager.GenerateTiles(currentLevel);
-            StartCoroutine(ScrambleAfterDelay(baseMemorizeTime + currentLevel));
+            StartLevel();
         }
 
         private void EndGame()
@@ -316,6 +432,16 @@ namespace MindTiles.Core
 
             // Game completed: the next run starts from level 1 again.
             SaveLevel(1);
+        }
+
+        // Pause-menu "Reset progress" (after the player confirmed): wipe scores and
+        // levels, then reload the game scene so the run starts clean in the same mode.
+        public void ResetProgressAndRestart()
+        {
+            SaveSystem.ResetProgress();
+            IsPaused = false;
+            Time.timeScale = 1f;
+            SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
         }
 
         public void SetPaused(bool paused)

@@ -5,8 +5,8 @@ using MindTiles.Core;
 namespace MindTiles.Grid
 {
     // Owns the grid geometry (size, cell size, world<->grid conversion) and
-    // the occupancy map (which tile sits in which cell). Spawns tiles for a
-    // given level according to the difficulty curve.
+    // the occupancy map (which tile sits in which cell). Spawns tiles either
+    // for a Daily Streak level number or for an explicit LevelSpec (Endless).
     //
     // The board panel (gridBoundaryPanel) is the single source of truth for
     // layout: cell size, tile scale, grid center, grid lines and the result
@@ -24,11 +24,13 @@ namespace MindTiles.Grid
         [SerializeField] private List<GameObject> hardTilePrefabs;
 
         [Header("Grid Settings")]
+        [Tooltip("Design cell size of the easy tier. Tile scales below are relative to their tier's cell size.")]
         [SerializeField] private float baseCellSize = 1f;
+        [SerializeField] private float intermediateCellSize = 0.8f;
+        [SerializeField] private float hardCellSize = 0.6f;
 
         [Header("Grid Boundaries (UI)")]
         [SerializeField] private RectTransform gridBoundaryPanel; // Sınırları belirleyecek UI Paneli
-        [SerializeField] private Camera mainCamera; // Ekran-Dünya dönüşümü için kamera
 
         [Tooltip("Sizes the board to the level's grid shape. Optional: without it the grid is derived from the board as it is.")]
         [SerializeField] private MindTiles.UI.BoardFitter boardFitter;
@@ -43,9 +45,10 @@ namespace MindTiles.Grid
 
         private int gridWidth;
         private int gridHeight;
-        // Per-level design values (cell size and tile scale at the design cell size).
+        // Design cell size of the current level (used to pick a grid when none is given).
         private float levelCellSize;
-        private float levelTileScale;
+        private readonly List<GameObject> spawnPrefabs = new List<GameObject>();
+        private readonly List<float> spawnScales = new List<float>();
         // Board rect (world center xy, world size zw) the layout was last built for.
         private Vector4 lastBoardRect;
         private bool hasLayout;
@@ -59,86 +62,116 @@ namespace MindTiles.Grid
         // Raised after the layout was recomputed because the board changed.
         public event System.Action LayoutChanged;
 
-        private float CurrentTileScale => levelTileScale * CurrentCellSize / levelCellSize;
+        // Tile scale per world unit of cell, per tier: a tile always fills the
+        // same share of its cell, whatever the cell size ends up being.
+        private float EasyScalePerCell => easyScale / baseCellSize;
+        private float MidScalePerCell => intermediateScale / intermediateCellSize;
+        private float HardScalePerCell => hardScale / hardCellSize;
 
+        // Daily Streak: fixed tiers by level number; the grid is chosen to fill the screen.
         public void GenerateTiles(int currentLevel)
         {
-            occupancy.Clear();
-
-            // 1. ÖNCE HÜCRE BOYUTUNU BELİRLE (Level'a göre)
-            // Mevcut kodunda önce UpdateGridSize çalışıyordu, artık boyutu dinamik
-            // hesaplayacağımız için önce tile boyutunu (CurrentCellSize) bilmemiz lazım.
             int tileCount;
-            GameObject singlePrefab = null;
-            List<GameObject> prefabPool = null;
-            float scale;
+            ClearSpawnList();
 
             if (currentLevel <= 3)
             {
                 tileCount = 6;
-                CurrentCellSize = baseCellSize;
-                singlePrefab = easyTilePrefab;
-                scale = easyScale;
+                levelCellSize = baseCellSize;
+                AddSpawns(tileCount, easyTilePrefab, null, EasyScalePerCell);
             }
             else if (currentLevel <= 7)
             {
                 tileCount = 10;
-                CurrentCellSize = 0.8f;
-                prefabPool = intermediateTilePrefabs;
-                scale = intermediateScale;
+                levelCellSize = intermediateCellSize;
+                AddSpawns(tileCount, null, intermediateTilePrefabs, MidScalePerCell);
             }
             else
             {
                 tileCount = 15;
-                CurrentCellSize = 0.6f;
-                prefabPool = hardTilePrefabs;
-                scale = hardScale;
+                levelCellSize = hardCellSize;
+                AddSpawns(tileCount, null, hardTilePrefabs, HardScalePerCell);
             }
 
-            levelCellSize = CurrentCellSize;
-            levelTileScale = scale;
-
-            // 2. IZGARA BOYUTUNU PANELDEN HESAPLA, SONRA HÜCRE BOYUTUNU PANELE SIĞDIR
+            occupancy.Clear();
             CalculateGridDimensions();
             ApplyLayout();
+            SpawnQueued();
+        }
 
-            // 3. RASTGELE YERLEŞTİRME (Mevcut mantık)
+        // Endless: the difficulty system decides the exact grid and tile mix.
+        public void GenerateTiles(LevelSpec spec)
+        {
+            ClearSpawnList();
+            AddSpawns(spec.easyTiles, easyTilePrefab, null, EasyScalePerCell);
+            AddSpawns(spec.midTiles, null, intermediateTilePrefabs, MidScalePerCell);
+            AddSpawns(spec.hardTiles, null, hardTilePrefabs, HardScalePerCell);
+
+            occupancy.Clear();
+            levelCellSize = baseCellSize;
+            gridWidth = Mathf.Max(1, spec.columns);
+            gridHeight = Mathf.Max(1, spec.rows);
+            if (boardFitter != null)
+                boardFitter.SetGrid(gridWidth, gridHeight);
+            ApplyLayout();
+            SpawnQueued();
+        }
+
+        private void ClearSpawnList()
+        {
+            spawnPrefabs.Clear();
+            spawnScales.Clear();
+        }
+
+        // Queues `count` tiles from either a single prefab or a random pick from a pool.
+        private void AddSpawns(int count, GameObject single, List<GameObject> pool, float scalePerCell)
+        {
+            for (int i = 0; i < count; i++)
+            {
+                GameObject prefab = single;
+                if (prefab == null && pool != null && pool.Count > 0)
+                    prefab = pool[Random.Range(0, pool.Count)];
+
+                if (prefab == null)
+                {
+                    Debug.LogError("GridManager: no tile prefab configured for this tier.");
+                    return;
+                }
+
+                spawnPrefabs.Add(prefab);
+                spawnScales.Add(scalePerCell);
+            }
+        }
+
+        // Places every queued tile in a random free cell.
+        private void SpawnQueued()
+        {
             List<Vector2Int> availablePositions = GetAllGridPositions();
 
-            // Eğer sığabilecek yer, üretilmesi gereken kareden azsa sayıyı kısıtla (Crash önleyici)
-            if (tileCount > availablePositions.Count)
-                tileCount = availablePositions.Count;
+            // Never ask for more tiles than there are cells.
+            int count = Mathf.Min(spawnPrefabs.Count, availablePositions.Count);
 
-            for (int i = 0; i < tileCount; i++)
+            for (int i = 0; i < count; i++)
             {
                 int index = Random.Range(0, availablePositions.Count);
                 Vector2Int gridPos = availablePositions[index];
                 availablePositions.RemoveAt(index);
 
-                GameObject prefabToSpawn = singlePrefab;
-                if (prefabToSpawn == null && prefabPool != null && prefabPool.Count > 0)
-                    prefabToSpawn = prefabPool[Random.Range(0, prefabPool.Count)];
-
-                if (prefabToSpawn == null)
-                {
-                    Debug.LogError("GridManager: no tile prefab configured for this level.");
-                    return;
-                }
-
-                Vector3 worldPos = GetWorldPositionFromGridCoordinate(gridPos);
-                GameObject tileObj = Instantiate(prefabToSpawn, worldPos, Quaternion.identity);
-                tileObj.transform.localScale = Vector3.one * CurrentTileScale;
+                GameObject prefab = spawnPrefabs[i];
+                GameObject tileObj = Instantiate(prefab, GetWorldPositionFromGridCoordinate(gridPos), Quaternion.identity);
+                tileObj.transform.localScale = Vector3.one * (spawnScales[i] * CurrentCellSize);
                 tileObj.name = $"Tile_{gridPos.x}_{gridPos.y}";
 
                 TileController tile = tileObj.GetComponent<TileController>();
                 if (tile == null)
                     tile = tileObj.AddComponent<TileController>();
 
-                tile.Initialize(gridPos, prefabToSpawn.GetInstanceID());
+                tile.Initialize(gridPos, prefab.GetInstanceID(), spawnScales[i]);
                 occupancy[gridPos] = tile;
                 GameManager.Instance.RegisterTile(tileObj, tile);
             }
         }
+
         // Board rect in world space: xy = center, zw = size. Uses the world
         // corners, so pivot, parent scale and non-uniform scale are all handled.
         private Vector4 ReadBoardRect()
@@ -148,6 +181,9 @@ namespace MindTiles.Grid
             Vector3 max = boardCorners[2];
             return new Vector4((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f, max.x - min.x, max.y - min.y);
         }
+
+        // Space kept between the grid and the board's edges (set on the BoardFitter).
+        private float BoardPadding => boardFitter != null ? boardFitter.PaddingWorld : 0f;
 
         // Smallest cell size, as a fraction of the level's design cell size, the solver will accept.
         private const float MinCellRatio = 0.8f;
@@ -160,7 +196,8 @@ namespace MindTiles.Grid
         {
             if (boardFitter != null && boardFitter.TryGetAvailableArea(out Vector4 area))
             {
-                SolveGrid(area.z, area.w, out gridWidth, out gridHeight);
+                float pad = BoardPadding;
+                SolveGrid(area.z - 2f * pad, area.w - 2f * pad, out gridWidth, out gridHeight);
                 boardFitter.SetGrid(gridWidth, gridHeight);
                 return;
             }
@@ -217,7 +254,8 @@ namespace MindTiles.Grid
                 if (board.z <= 0f || board.w <= 0f) return;
 
                 lastBoardRect = board;
-                CurrentCellSize = Mathf.Min(board.z / gridWidth, board.w / gridHeight);
+                float pad = BoardPadding;
+                CurrentCellSize = Mathf.Min((board.z - 2f * pad) / gridWidth, (board.w - 2f * pad) / gridHeight);
                 transform.position = new Vector3(board.x, board.y, 0f);
             }
             else
@@ -226,12 +264,11 @@ namespace MindTiles.Grid
             }
             hasLayout = true;
 
-            float tileScale = CurrentTileScale;
             foreach (var entry in occupancy)
             {
                 Transform t = entry.Value.transform;
                 t.position = GetWorldPositionFromGridCoordinate(entry.Key);
-                t.localScale = Vector3.one * tileScale;
+                t.localScale = Vector3.one * (entry.Value.ScalePerCell * CurrentCellSize);
             }
 
             if (gridLines != null)
