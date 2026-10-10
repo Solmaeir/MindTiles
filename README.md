@@ -16,7 +16,7 @@ A mobile memory-puzzle game built with Unity. A pattern of tiles is shown for a 
 4. **Check.** Pressing the check button (or the timer running out) scores the level and shows a reveal: green wash plus check mark on correct tiles, red wash plus an arrow to the right cell on wrong ones. The end panel opens one second later.
 
 Tiles of the same kind are interchangeable: a cell counts as correct if it holds *any* tile of the type that belongs there, because two identical-looking tiles can't be told apart by the player.
-<img width="460" height="1024" alt="image" src="https://github.com/user-attachments/assets/4759bd8f-3e0a-480d-956c-dac72bf43298" /> <img width="460" height="1024" alt="image" src="https://github.com/user-attachments/assets/b7021520-50a0-4697-a260-382e955f7f57" /> <img width="460" height="1024" alt="image" src="https://github.com/user-attachments/assets/19d01493-2598-4ef7-b6db-5167e80d4c4b" />
+<img width="230" height="512" alt="image" src="https://github.com/user-attachments/assets/4759bd8f-3e0a-480d-956c-dac72bf43298" /> <img width="230" height="512" alt="image" src="https://github.com/user-attachments/assets/b7021520-50a0-4697-a260-382e955f7f57" /> <img width="230" height="512" alt="image" src="https://github.com/user-attachments/assets/19d01493-2598-4ef7-b6db-5167e80d4c4b" />
 
 
 
