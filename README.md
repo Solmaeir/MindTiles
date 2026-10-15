@@ -23,9 +23,7 @@ A level is **passed** when at least 66% of the tiles are correct, rounded up (4 
 Tiles of the same kind are interchangeable: a cell counts as correct if it holds *any* tile of the type that belongs there, because two identical-looking tiles can't be told apart by the player.
 
 
-<img width="230" height="512" alt="4" src="https://github.com/user-attachments/assets/4d03e9c7-1fe9-4993-84be-c10a7b322610" /> <img width="230" height="512" alt="2" src="https://github.com/user-attachments/assets/5467d9a2-d680-444c-b932-eb06a114f1d3" />
-
-<img width="230" height="512" alt="1" src="https://github.com/user-attachments/assets/569974ee-7d16-4190-9323-ad5f2afe1700" /> <img width="230" height="512" alt="3" src="https://github.com/user-attachments/assets/4802df1e-b9dc-4745-bd4d-8bbe1f833d51" />
+<img width="200" height="440" alt="4" src="https://github.com/user-attachments/assets/4d03e9c7-1fe9-4993-84be-c10a7b322610" /> <img wwidth="200" height="440" alt="2" src="https://github.com/user-attachments/assets/5467d9a2-d680-444c-b932-eb06a114f1d3" /> <img width="200" height="440" alt="1" src="https://github.com/user-attachments/assets/569974ee-7d16-4190-9323-ad5f2afe1700" /> <img width="200" height="440" alt="3" src="https://github.com/user-attachments/assets/4802df1e-b9dc-4745-bd4d-8bbe1f833d51" />
 
 
 ### Game modes
