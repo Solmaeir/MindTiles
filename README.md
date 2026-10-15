@@ -10,6 +10,8 @@ A mobile memory-puzzle game built with Unity. A pattern of tiles is shown for a 
 
 ## How the game plays
 
+The app opens on a loading screen (tile progress bar), then the menu: logo, weekly streak bar, total score, and the two mode buttons. The "i" and gear buttons at the top right open the Info and Settings panels.
+
 1. **Memorize.** The tiles are shown in their original cells while a countdown runs.
 2. **Scramble.** All tiles are moved to random cells and the level timer starts (Endless mode).
 3. **Rebuild.** The player moves tiles back by dragging them onto a cell, or by flicking them one cell in a direction. Moving onto an occupied cell swaps the two tiles.
@@ -40,6 +42,10 @@ The menu's "i" button opens a two-tab panel (`InfoPanel`): **Info** (studio, ver
 ### Weekly streak
 
 Finishing a Daily Streak run (passing level 10) fills one box of the 7-box bar on the menu (`StreakBar`). Finishing it again the same day changes nothing; missing a whole day empties the bar. After 7 days in a row the bar starts over. The streak (`DailyStreak`, `SaveData.dailyStreak`) is stored in the local save file with the device's local date, so changing the phone's clock changes it, and "Reset progress" clears it.
+
+### Settings
+
+One shared Settings panel prefab is used from the menu and from the in-game pause panel: Sound and Music switches (applied to `AudioManager` immediately), Vibration (saved, not used yet) and "Reset progress" behind a confirmation dialog.
 
 ### Hints
 
@@ -88,17 +94,23 @@ All thresholds are exposed in the Inspector on the `EndlessDifficulty` component
 
 ```
 Assets/MindTiles/Scripts
-├── Core         GameManager, EndlessDifficulty, HintManager, SaveSystem/SaveData, GameSession, FrameRateSetup
+├── Boot         BootLoader (loading screen)
+├── Core         GameManager, EndlessDifficulty, DailyStreak, HintManager, SaveSystem/SaveData, GameSession, FrameRateSetup
 ├── Grid         GridManager, TileController, GridLinesRenderer, RoundResultOverlay, MarkStyle, LevelSpec
 ├── Audio        AudioManager, UISound, Sfx
 ├── Input        DragController
 ├── Validation   PatternValidator
 ├── Score        ScoreCalculator
 └── UI           ButtonManager, UIManager, MenuManager, MenuExitTransition, BoardFitter, SafeArea,
-                 FillToScreenEdges, ConfirmDialog, InfoPanel, StreakBar, CountdownPanel + small visual effects
+                 FillToScreenEdges, ConfirmDialog, SettingsPanel, PausePanelView, ToggleSwitch, InfoPanel,
+                 StreakBar, ScorePillFitter, CountdownPanel + small visual effects
+
+Assets/MindTiles/Editor   MindTilesUIBuilder (Tools > MindTiles menu, see "UI builder")
+Assets/MindTiles/UI       Generated UI sprites and the shared panel prefabs
+Tools/                    Python scripts that generate the UI sprites and social icons
 ```
 
-Two scenes: `MenuSpace` (index 0) and `SampleScene` (index 1, the game).
+Three scenes, in build order: `Loading` (0), `MenuSpace` (1, the menu) and `SampleScene` (2, the game).
 
 ### Responsibilities
 
@@ -115,6 +127,9 @@ Two scenes: `MenuSpace` (index 0) and `SampleScene` (index 1, the game).
 | `UIManager` | Text readouts only; two header layouts (one per mode). |
 | `AudioManager` | All sound. Spawned from `Resources/AudioManager` before the first scene, survives scene loads, owns the only `AudioListener`. Music per scene with fades; SFX via `AudioManager.Play(Sfx.X)`; volumes follow the settings switches. |
 | `UISound` | Put on a `Button` to play a click / panel open / panel close sound. |
+| `DailyStreak` | Weekly streak rules (days in a row, boxes to fill, recording a finished run). |
+| `BootLoader` | Loading screen: loads the menu in the background and drives the progress bar. |
+| `SettingsPanel` / `InfoPanel` | The shared settings panel and the two-tab info panel. |
 
 ### Technical notes
 
@@ -125,17 +140,21 @@ Two scenes: `MenuSpace` (index 0) and `SampleScene` (index 1, the game).
 
 **Safe area.** `SafeArea` fits a panel to `Screen.safeArea`, zeroes leftover offsets, re-applies only when the screen or safe area changes, and exposes per-edge inset scale and extra padding in the Inspector. `FillToScreenEdges` lets the end panel extend to the real screen edges while its top edge stays where the layout puts it.
 
-**Save system.** JSON in `Application.persistentDataPath`. Writes go to a temp file first with the previous file kept as `.bak`; loading falls back to temp/backup if the main file is missing or corrupt. Saved on hint use, after scoring, on level change, and on `OnApplicationPause` / `OnApplicationQuit` (the reliable moment on mobile). Stored: hint counts, Daily Streak high score and level, Endless level/total score/stage/rating, preferences. The current Daily Streak run score is intentionally *not* persisted (`GameSession`, static, lives for one app run).
+**Save system.** JSON in `Application.persistentDataPath`. Writes go to a temp file first with the previous file kept as `.bak`; loading falls back to temp/backup if the main file is missing or corrupt. Saved on hint use, after scoring, on level change, and on `OnApplicationPause` / `OnApplicationQuit` (the reliable moment on mobile). Stored (save version 5): hint counts, Daily Streak high score and level, the weekly streak (days in a row and the last day), Endless level/total score/stage/rating, preferences (sound, music, vibration). The current Daily Streak run score is intentionally *not* persisted (`GameSession`, static, lives for one app run).
 
 **Rendering of marks.** `RoundResultOverlay` draws washes, check marks and arrows from a small pool of `SpriteRenderer`s (no per-show allocations). The check, arrow head and capsule line are generated procedurally into mip-mapped textures (smooth edges, no art files); the arrow line is a 9-sliced capsule so its round caps never stretch. All colors and sizes live in a shared `MarkStyle` ScriptableObject (`Assets/MindTiles/Settings/MarkStyle.asset`) and update live in Play. Grid lines are a single dynamic mesh (one draw call).
 
 **Input.** Unity Input System (`Pointer.current`, works for mouse and touch). One raycast per press; while dragging the per-frame cost is a clamp and a transform write. Settling animations re-read target positions every frame so a layout change mid-animation can't leave a tile at a stale position. Pausing or locking mid-drag puts the tile back.
 
-**Menu transition.** `MenuExitTransition` slides the menu elements off-screen at a shared speed (distance precomputed once, then `start + dir * travelled` per frame, zero cost while idle), shows a loading text and starts `LoadSceneAsync` immediately with `allowSceneActivation = false`, releasing it once the animation and a minimum display time are done and loading has reached 90%.
+**Loading screen.** `BootLoader` starts loading the menu with `LoadSceneAsync` right away and fills the tile bar with the smaller of the real load progress and a minimum display time, so it never just flashes.
 
-**Events.** Cross-system notifications (`RoundFinished`, `RoundStarted`, `HintCountsChanged`, `GridManager.LayoutChanged`) are C# events, subscribed in `OnEnable`/`OnDisable` or `Awake`/`OnDestroy` so subscribers don't depend on initialization order.
+**Menu transition.** `MenuExitTransition` slides the menu elements (logo, buttons, streak bar, score pill) off-screen at a shared speed (distance precomputed once, then `start + dir * travelled` per frame, zero cost while idle), shows a loading text and starts `LoadSceneAsync` immediately with `allowSceneActivation = false`, releasing it once the animation and a minimum display time are done and loading has reached 90%.
 
-**Other.** Score/performance formulas are pure static functions (`ScoreCalculator`). A reusable `ConfirmDialog` backs the "Reset progress" flow (pause menu and menu settings). Frame rate is set to 60 before the first scene loads.
+**Audio.** `AudioManager` is a prefab in `Resources`, spawned before the first scene loads, so sound works whichever scene Play starts in. It owns the only `AudioListener` (cameras have none). Music is picked per scene name and cross-fades; it plays quieter while paused. UI clicks use one source, tile sounds a second one with a small random pitch, and the memorize countdown a third one whose pitch stretches the countdown clip to exactly 3 seconds (`Countdown Fit Seconds`).
+
+**Events.** Cross-system notifications (`RoundFinished`, `RoundStarted`, `RoundResult(passed)`, `RunCompleted`, `HintCountsChanged`, `GridManager.LayoutChanged`, `SettingsPanel.ProgressReset`) are C# events, subscribed in `OnEnable`/`OnDisable` or `Awake`/`OnDestroy` so subscribers don't depend on initialization order.
+
+**Other.** Score/performance formulas, including the pass threshold, are pure static functions (`ScoreCalculator`). The menu score pill (`ScorePillFitter`) widens with the score instead of shrinking the text. A reusable `ConfirmDialog` backs the "Reset progress" flow (pause menu and menu settings). Frame rate is set to 60 before the first scene loads.
 
 ---
 
@@ -151,7 +170,10 @@ Two scenes: `MenuSpace` (index 0) and `SampleScene` (index 1, the game).
 ## Assets
 
 - **[Space Game GUI Kit](https://assetstore.unity.com/packages/2d/gui/space-game-gui-kit-298577)** by danprops - buttons, containers/frames, backgrounds, clouds, moon/sun/star decorations and icons used across the menu and in-game UI. Lives in `Assets/Space_Exploration_GUI_Kit`; see the README inside that folder for its terms.
-- **TextMesh Pro** essentials and the **Asap Bold** and **Righteous** fonts (as TMP SDF assets in `Assets/MindTiles/Fonts`).
+- **TextMesh Pro** essentials. UI fonts: **Fredoka Bold** (titles, buttons) and **Nunito ExtraBold** (labels), both SIL Open Font License (license files next to the TTFs in `Assets/MindTiles/Fonts/Font Sources/static`), as TMP SDF assets in `Assets/MindTiles/Fonts`. The older **Asap Bold** and **Righteous** SDF assets are still in that folder.
+- **Casual Game Sounds U6** (`Assets/Casual Game Sounds U6`) - sound effects; see `license.pdf` inside the package.
+- Music and sound clips in `Assets/MindTiles/Sounds` (including *Cosmic-Puzzle*, the menu music): _add the source / license of each clip here_.
+- UI sprites (buttons, tiles, slots, logo) are generated by `Tools/generate_ui_sprites.py`; the Instagram and X icons on the Info panel are simple drawn glyphs from `Tools/generate_social_icons.py`, not the official brand artwork.
 - Tile artwork (`Assets/MindTiles/Prefabs`): _add the source / license of the tile sprites here_.
 
 ---
@@ -160,10 +182,10 @@ Two scenes: `MenuSpace` (index 0) and `SampleScene` (index 1, the game).
 
 1. Open the project in Unity 6000.0.79f1.
 2. `File > Build Profiles`, switch to **Android**.
-3. Check *Build App Bundle (Google Play)* for an `.aab` (store upload), leave it unchecked for an `.apk` (direct install on a device). Scenes in the build: `MenuSpace`, then `SampleScene`.
+3. Check *Build App Bundle (Google Play)* for an `.aab` (store upload), leave it unchecked for an `.apk` (direct install on a device). Scenes in the build: `Loading`, `MenuSpace`, then `SampleScene` (the Unity splash screen is turned off; `Loading` is the first screen).
 4. Android SDK, NDK, OpenJDK and Gradle come from the Unity Hub Android module.
 
-Before a store release: set a real package name (currently `com.DefaultCompany.Myproject`), product name, app icon and a release keystore.
+Before a store release: check the package name in *Player Settings > Other Settings* (company is `PakueGames`, product `Mind Tiles`), set the app icon and a release keystore. The version shown on the Info panel is the Player Settings *Version*.
 
 ## Tuning without touching code
 
@@ -177,6 +199,14 @@ Before a store release: set a real package name (currently `com.DefaultCompany.M
 | Hint duration, menu transition speed | `HintManager`, `MenuExitTransition` |
 | Music and sound clips, per-clip volume, fade time | `Assets/MindTiles/Resources/AudioManager.prefab` |
 | Pass threshold | `passAccuracy` on `GameManager` |
+| Countdown sound length, paused music volume | `AudioManager.prefab` (`Countdown Fit Seconds`, `Paused Music Volume`) |
+| Contact e-mail, Instagram and X links | `InfoPanel` component on `Assets/MindTiles/UI/Prefabs/InfoPanel.prefab` |
+| How to Play text | Text objects inside the same prefab |
+| End panel titles and button labels | `UIManager` (End Panel section) |
+
+### UI builder
+
+`Tools > MindTiles` rebuilds the redesigned UI from code: 1 import sprites, 2 create fonts, 3 build panel prefabs, 4 build the loading scene, 5 rebuild the menu, 6 rebuild game panels, 7 restyle the game HUD, 8 add the streak bar, 9 build the info panel, 10 update the info panel and score pill in place. Steps 3 and 9 recreate the panel prefabs from scratch, so hand edits made to them (texts, links) are lost; step 10 only patches the existing Info panel and menu.
 
 Test helpers (right-click the component header): `GameManager > Save > Reset Save Data`, `Add 3 Hints Of Each Type`; `EndlessDifficulty > Endless > Reset Endless Progress`.
 
@@ -184,4 +214,6 @@ Test helpers (right-click the component header): `GameManager > Save > Reset Sav
 
 - Daily Streak can be played any number of times a day; only the first finished run of a day counts for the weekly streak.
 - Vibration is stored in the save file but not used yet.
+- The Instagram and X buttons open the sites' home pages until real profile links are entered on the `InfoPanel` prefab.
+- The weekly streak uses the device's local date, so changing the phone's clock changes it.
 - The game scene opened directly in the editor always starts in Daily Streak; start from the menu to test Endless.
