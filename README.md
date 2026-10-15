@@ -1,4 +1,4 @@
-<img width="945" height="2048" alt="4" src="https://github.com/user-attachments/assets/d7ca5ca7-4f74-454b-9426-fd41581860c2" />
+
 # MindTiles
 
 A mobile memory-puzzle game built with Unity. A pattern of tiles is shown for a few seconds, then the tiles are scrambled and the player has to put each one back where it was, by drag-and-drop or swipe.
