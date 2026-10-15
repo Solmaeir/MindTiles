@@ -1,3 +1,4 @@
+<img width="945" height="2048" alt="4" src="https://github.com/user-attachments/assets/d7ca5ca7-4f74-454b-9426-fd41581860c2" />
 # MindTiles
 
 A mobile memory-puzzle game built with Unity. A pattern of tiles is shown for a few seconds, then the tiles are scrambled and the player has to put each one back where it was, by drag-and-drop or swipe.
@@ -22,8 +23,9 @@ A level is **passed** when at least 66% of the tiles are correct, rounded up (4 
 Tiles of the same kind are interchangeable: a cell counts as correct if it holds *any* tile of the type that belongs there, because two identical-looking tiles can't be told apart by the player.
 
 
-<img width="230" height="512" alt="image" src="https://github.com/user-attachments/assets/4759bd8f-3e0a-480d-956c-dac72bf43298" /> <img width="230" height="512" alt="image" src="https://github.com/user-attachments/assets/b7021520-50a0-4697-a260-382e955f7f57" /> <img width="230" height="512" alt="image" src="https://github.com/user-attachments/assets/19d01493-2598-4ef7-b6db-5167e80d4c4b" />
+<img width="230" height="512" alt="4" src="https://github.com/user-attachments/assets/4d03e9c7-1fe9-4993-84be-c10a7b322610" /> <img width="230" height="512" alt="2" src="https://github.com/user-attachments/assets/5467d9a2-d680-444c-b932-eb06a114f1d3" />
 
+<img width="230" height="512" alt="1" src="https://github.com/user-attachments/assets/569974ee-7d16-4190-9323-ad5f2afe1700" /> <img width="230" height="512" alt="3" src="https://github.com/user-attachments/assets/4802df1e-b9dc-4745-bd4d-8bbe1f833d51" />
 
 
 ### Game modes
