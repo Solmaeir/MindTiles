@@ -15,16 +15,26 @@ A mobile memory-puzzle game built with Unity. A pattern of tiles is shown for a 
 3. **Rebuild.** The player moves tiles back by dragging them onto a cell, or by flicking them one cell in a direction. Moving onto an occupied cell swaps the two tiles.
 4. **Check.** Pressing the check button (or the timer running out) scores the level and shows a reveal: green wash plus check mark on correct tiles, red wash plus an arrow to the right cell on wrong ones. The end panel opens one second later.
 
+A level is **passed** when at least 66% of the tiles are correct, rounded up (4 of 6, 7 of 10, 10 of 15; `passAccuracy` on `GameManager`). A failed level gives no points and is played again (the end panel shows "TRY AGAIN" / "Retry").
+
 Tiles of the same kind are interchangeable: a cell counts as correct if it holds *any* tile of the type that belongs there, because two identical-looking tiles can't be told apart by the player.
 
 ### Game modes
 
 | Mode | What it is |
 |---|---|
-| **Daily Streak** | A fixed 10-level run with three difficulty tiers. Score is 10 points per correct tile. Progress (level, highest score) is saved. |
+| **Daily Streak** | A fixed 10-level run with three difficulty tiers. Score is 10 points per correct tile. Progress (level, highest score) is saved. Passing level 10 ends the run: the end panel shows the total score and its button ("Main Menu") returns to the menu. |
 | **Endless** | Adaptive difficulty over a 500-level ladder, with a per-level time limit, speed-weighted scoring and a total score that is never reset by closing the app. |
 
 The mode is chosen on the menu (`GameSession.Mode`) before the game scene loads.
+
+### Info panel
+
+The menu's "i" button opens a two-tab panel (`InfoPanel`): **Info** (studio, version read from the Player Settings, contact e-mail, Instagram and X links) and **How to Play** (a scrollable list of steps). The contact e-mail and the two links are fields on the `InfoPanel` component of `Assets/MindTiles/UI/Prefabs/InfoPanel.prefab`; a link left empty is hidden. The How to Play text is plain text in the same prefab (`HowToPlayPage/Scroll/Viewport/Content`).
+
+### Weekly streak
+
+Finishing a Daily Streak run (passing level 10) fills one box of the 7-box bar on the menu (`StreakBar`). Finishing it again the same day changes nothing; missing a whole day empties the bar. After 7 days in a row the bar starts over. The streak (`DailyStreak`, `SaveData.dailyStreak`) is stored in the local save file with the device's local date, so changing the phone's clock changes it, and "Reset progress" clears it.
 
 ### Hints
 
@@ -43,7 +53,7 @@ Two hint types, 3 of each at first install. Counts are shown in a red badge on e
 |---|---|---|---|
 | 1-3 | 6 | 1 prefab (all identical) | position-only memory |
 | 4-7 | 10 | 3 prefabs | pattern + position |
-| 8-9 | 15 | 5 prefabs | pattern + position, smaller cells |
+| 8-10 | 15 | 5 prefabs | pattern + position, smaller cells |
 
 Memorize time is 3 s on level 1, then `3 + level` seconds. The grid size is not hard-coded; it is solved from the free screen area (see *Responsive layout*).
 
@@ -75,11 +85,12 @@ All thresholds are exposed in the Inspector on the `EndlessDifficulty` component
 Assets/MindTiles/Scripts
 ├── Core         GameManager, EndlessDifficulty, HintManager, SaveSystem/SaveData, GameSession, FrameRateSetup
 ├── Grid         GridManager, TileController, GridLinesRenderer, RoundResultOverlay, MarkStyle, LevelSpec
+├── Audio        AudioManager, UISound, Sfx
 ├── Input        DragController
 ├── Validation   PatternValidator
 ├── Score        ScoreCalculator
 └── UI           ButtonManager, UIManager, MenuManager, MenuExitTransition, BoardFitter, SafeArea,
-                 FillToScreenEdges, ConfirmDialog, CountdownPanel + small visual effects
+                 FillToScreenEdges, ConfirmDialog, InfoPanel, StreakBar, CountdownPanel + small visual effects
 ```
 
 Two scenes: `MenuSpace` (index 0) and `SampleScene` (index 1, the game).
@@ -97,6 +108,8 @@ Two scenes: `MenuSpace` (index 0) and `SampleScene` (index 1, the game).
 | `SaveSystem` / `SaveData` | Local persistence. |
 | `ButtonManager` | Thin input layer: binds buttons in code (`OnEnable`/`OnDisable`), contains no game rules. |
 | `UIManager` | Text readouts only; two header layouts (one per mode). |
+| `AudioManager` | All sound. Spawned from `Resources/AudioManager` before the first scene, survives scene loads, owns the only `AudioListener`. Music per scene with fades; SFX via `AudioManager.Play(Sfx.X)`; volumes follow the settings switches. |
+| `UISound` | Put on a `Button` to play a click / panel open / panel close sound. |
 
 ### Technical notes
 
@@ -157,11 +170,13 @@ Before a store release: set a real package name (currently `com.DefaultCompany.M
 | Board spacing, board padding, header gaps | `BoardFitter` on `GameBoard` |
 | Safe-area insets and padding | `SafeArea` components |
 | Hint duration, menu transition speed | `HintManager`, `MenuExitTransition` |
+| Music and sound clips, per-clip volume, fade time | `Assets/MindTiles/Resources/AudioManager.prefab` |
+| Pass threshold | `passAccuracy` on `GameManager` |
 
 Test helpers (right-click the component header): `GameManager > Save > Reset Save Data`, `Add 3 Hints Of Each Type`; `EndlessDifficulty > Endless > Reset Endless Progress`.
 
 ## Known limitations
 
-- Daily Streak is a fixed 10-level run; there is no once-per-day limit or streak counter yet.
-- Preferences (music/sfx volume, vibration) are stored in the save file but not yet wired to any audio or settings controls.
+- Daily Streak can be played any number of times a day; only the first finished run of a day counts for the weekly streak.
+- Vibration is stored in the save file but not used yet.
 - The game scene opened directly in the editor always starts in Daily Streak; start from the menu to test Endless.

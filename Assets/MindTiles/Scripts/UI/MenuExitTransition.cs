@@ -43,7 +43,7 @@ namespace MindTiles.UI
         [SerializeField] private TMP_Text loadingText;
 
         [Header("Loading")]
-        [SerializeField] private int sceneBuildIndex = 1;
+        [SerializeField] private string sceneName = "SampleScene";
         [Tooltip("Minimum seconds the loading text stays visible, so it never just flashes.")]
         [SerializeField] private float minLoadingTime = 2f;
         [SerializeField] private float dotInterval = 0.4f;
@@ -75,7 +75,7 @@ namespace MindTiles.UI
             if (inputBlocker != null) inputBlocker.SetActive(true);
 
             // Start loading right away so it overlaps the animation; activation is held back.
-            loadOp = SceneManager.LoadSceneAsync(sceneBuildIndex);
+            loadOp = SceneManager.LoadSceneAsync(sceneName);
             loadOp.allowSceneActivation = false;
 
             Prepare();

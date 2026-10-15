@@ -1,6 +1,7 @@
 using System.Collections;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using MindTiles.Audio;
 using MindTiles.Grid;
 using MindTiles.Core;
 
@@ -110,6 +111,7 @@ namespace MindTiles.InputHandling
 
                 isDragging = true;
                 selectedTile.SetDragging(true);
+                AudioManager.Play(Sfx.TilePickUp);
             }
 
             Vector3 target = pointerWorldPos + grabOffset;
@@ -213,6 +215,9 @@ namespace MindTiles.InputHandling
             tile.transform.position = gridManager.GetWorldPositionFromGridCoordinate(tile.CurrentGridPos);
             if (tile2 != null)
                 tile2.transform.position = gridManager.GetWorldPositionFromGridCoordinate(tile2.CurrentGridPos);
+
+            // Landing sound: swapped with another tile, moved to an empty cell, or slid back home.
+            AudioManager.Play(target == origin ? Sfx.TileReturn : tile2 != null ? Sfx.TileSwap : Sfx.TileDrop);
 
             isAnimating = false;
         }

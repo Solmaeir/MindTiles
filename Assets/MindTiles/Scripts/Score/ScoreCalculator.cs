@@ -6,6 +6,20 @@ namespace MindTiles.Score
     // performance grade. No state, so the formulas can be tuned in one place.
     public static class ScoreCalculator
     {
+        // Fewest correct tiles needed to pass a level: total x passAccuracy,
+        // rounded up (6 tiles at 0.66 -> 4, 10 -> 7, 15 -> 10). The small
+        // tolerance keeps float noise from asking one tile more (6 x 0.667 = 4.002).
+        public static int RequiredCorrect(int total, float passAccuracy)
+        {
+            if (total <= 0) return 0;
+            return Mathf.Clamp(Mathf.CeilToInt(total * passAccuracy - 0.01f), 1, total);
+        }
+
+        public static bool IsPassed(int correct, int total, float passAccuracy)
+        {
+            return total > 0 && correct >= RequiredCorrect(total, passAccuracy);
+        }
+
         // 1 = checked instantly, 0 = the timer ran out.
         public static float SpeedFactor(float timeUsed, float timeLimit)
         {

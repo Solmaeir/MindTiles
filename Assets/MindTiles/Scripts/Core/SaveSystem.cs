@@ -51,14 +51,15 @@ namespace MindTiles.Core
             }
         }
 
-        // "Reset progress": clears every score and level (Daily Streak and Endless,
-        // including this run's score) but keeps hints and preferences.
+        // "Reset progress": clears every score, level and the daily streak (Daily
+        // Streak and Endless, including this run's score) but keeps hints and preferences.
         public static void ResetProgress()
         {
             SaveData d = Data;
             d.highScore = 0;
             d.currentLevel = 0;
             d.endless = new EndlessSave();
+            d.dailyStreak = new DailyStreakSave();
             GameSession.Score = 0;
             Save();
         }

@@ -2,8 +2,10 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using MindTiles.Audio;
 using MindTiles.Grid;
 using MindTiles.InputHandling;
+using MindTiles.Score;
 using MindTiles.UI;
 using MindTiles.Validation;
 
@@ -21,6 +23,10 @@ namespace MindTiles.Core
         public static event System.Action RoundFinished;
         public static event System.Action RoundStarted;
         public static event System.Action HintCountsChanged;
+        // RoundResult: a level was scored; true = enough tiles correct (AudioManager plays pass/fail).
+        // RunCompleted: the last Daily Streak level was passed (sent instead of RoundResult).
+        public static event System.Action<bool> RoundResult;
+        public static event System.Action RunCompleted;
 
         [SerializeField] private GridManager gridManager;
         [SerializeField] private CountdownPanel countdownPanel;
@@ -37,6 +43,8 @@ namespace MindTiles.Core
         [Header("Scoring")]
         [Tooltip("Points added for every correctly placed tile when a level is checked.")]
         [SerializeField] private int pointsPerCorrectTile = 10;
+        [Tooltip("Share of tiles that must be correct to pass a level (rounded up: 0.66 -> 4 of 6, 7 of 10, 10 of 15). Below it the level gives no points and is replayed.")]
+        [SerializeField, Range(0.1f, 1f)] private float passAccuracy = 0.66f;
 
         [Header("Timing")]
         [SerializeField] private float baseMemorizeTime = 3f;
@@ -45,7 +53,7 @@ namespace MindTiles.Core
 
         [SerializeField] private int currentLevel = 1;
         private const int MaxLevel = 10;
-        private const int MenuSceneIndex = 0;
+        private const string MenuSceneName = "MenuSpace";
 
         public bool inputLocked = true;
         public bool IsPaused { get; private set; }
@@ -92,6 +100,11 @@ namespace MindTiles.Core
         public int EndlessTotalScore => IsEndless ? endless.TotalScore : 0;
         // Points earned by the last checked level (shown on the end panel).
         public int LastLevelPoints { get; private set; }
+        // Whether the last checked level had enough correct tiles. A failed level is replayed.
+        public bool LastRoundPassed { get; private set; } = true;
+        // The last Daily Streak level was just passed: the end panel shows the run's
+        // total score and its button leads back to the menu.
+        public bool RunComplete { get; private set; }
 
         // ---- Level timer (Endless) --------------------------------------------
         // Starts when the tiles are scrambled; when it hits zero the level is
@@ -132,7 +145,7 @@ namespace MindTiles.Core
         {
             int saved = SaveSystem.Data.currentLevel;
             if (saved > 0)
-                currentLevel = Mathf.Clamp(saved, 1, MaxLevel - 1);
+                currentLevel = Mathf.Clamp(saved, 1, MaxLevel);
         }
 
         private void SaveLevel(int level)
@@ -358,19 +371,33 @@ namespace MindTiles.Core
         {
             PatternValidator validator = PatternValidator.Instance;
             int correct = validator.EvaluateRound();
+            int total = validator.TotalTiles;
+            bool passed = ScoreCalculator.IsPassed(correct, total, passAccuracy);
+            LastRoundPassed = passed;
 
             if (IsEndless)
             {
-                LastLevelPoints = endless.RecordLevel(correct, validator.TotalTiles,
-                    timeLimit - timeRemaining, timeLimit, pointsPerCorrectTile);
+                LastLevelPoints = endless.RecordLevel(correct, total,
+                    timeLimit - timeRemaining, timeLimit, pointsPerCorrectTile, passed);
             }
             else
             {
-                LastLevelPoints = correct * pointsPerCorrectTile;
-                AddScore(LastLevelPoints);
+                LastLevelPoints = passed ? correct * pointsPerCorrectTile : 0;
+                if (passed) AddScore(LastLevelPoints);
+            }
+
+            // Passing the last level finishes the run and counts for today's streak.
+            RunComplete = !IsEndless && passed && currentLevel >= MaxLevel;
+            if (RunComplete)
+            {
+                DailyStreak.RecordCompletion();
+                SaveLevel(1);       // the next run starts from level 1 again
             }
 
             UIManager.Instance?.RefreshScoreTexts();
+            UIManager.Instance?.ShowRoundResult(passed, RunComplete);
+            if (RunComplete) RunCompleted?.Invoke();
+            else RoundResult?.Invoke(passed);
 
             if (resultOverlay != null)
             {
@@ -385,8 +412,14 @@ namespace MindTiles.Core
                 endPanel.SetActive(true);
         }
 
+        // End panel button: next level, retry, or (after the last level) back to the menu.
         public void CallLevel()
         {
+            if (RunComplete)
+            {
+                GoToMainMenu();
+                return;
+            }
             StartCoroutine(CallLevelRoutine());
         }
 
@@ -403,8 +436,9 @@ namespace MindTiles.Core
 
             yield return null;
 
-            // Endless already advanced its level (and difficulty) when the result was recorded.
-            if (IsEndless)
+            // Endless already advanced its level (and difficulty) when the result was recorded;
+            // a failed Daily Streak level is played again.
+            if (IsEndless || !LastRoundPassed)
             {
                 StartLevel();
                 yield break;
@@ -413,25 +447,8 @@ namespace MindTiles.Core
             if (currentLevel < MaxLevel)
                 currentLevel++;
 
-            if (currentLevel == MaxLevel)
-            {
-                EndGame();
-                yield break;
-            }
-
             SaveLevel(currentLevel);
             StartLevel();
-        }
-
-        private void EndGame()
-        {
-            RoundFinished?.Invoke();
-            if (endPanel != null)
-                endPanel.SetActive(true);
-            Time.timeScale = 0f;
-
-            // Game completed: the next run starts from level 1 again.
-            SaveLevel(1);
         }
 
         // Pause-menu "Reset progress" (after the player confirmed): wipe scores and
@@ -448,14 +465,17 @@ namespace MindTiles.Core
         {
             IsPaused = paused;
             Time.timeScale = paused ? 0f : 1f;
+            AudioManager.SetGamePaused(paused);
         }
 
         public void GoToMainMenu()
         {
             IsPaused = false;
             Time.timeScale = 1f;
+            // A finished run is over: the next one starts with a fresh run score.
+            if (RunComplete) GameSession.Score = 0;
             SaveSystem.Save();
-            SceneManager.LoadScene(MenuSceneIndex);
+            SceneManager.LoadScene(MenuSceneName);
         }
     }
 }

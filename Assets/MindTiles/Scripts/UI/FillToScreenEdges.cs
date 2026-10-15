@@ -2,16 +2,21 @@ using UnityEngine;
 
 namespace MindTiles.UI
 {
-    // Stretches a panel out to the screen's left, right and bottom edges
-    // (past the safe area), while its top edge stays exactly where the layout
-    // puts it. Used for the end panel so it reaches the bottom of the screen
-    // with no gap, without moving the edge the board is fitted against.
+    // Stretches a panel out to chosen screen edges (past the safe area) while
+    // the other edges stay exactly where the layout puts them. The end panel
+    // extends left/right/bottom (its top is what the board is fitted against);
+    // the game header extends left/right/top (its bottom is).
     //
     // Re-applies only when the safe area or canvas changes, and on enable
     // (the panel is hidden most of the time).
     [RequireComponent(typeof(RectTransform))]
     public class FillToScreenEdges : MonoBehaviour
     {
+        [SerializeField] private bool extendLeft = true;
+        [SerializeField] private bool extendRight = true;
+        [SerializeField] private bool extendBottom = true;
+        [SerializeField] private bool extendTop = false;
+
         private RectTransform panel;
         private RectTransform parent;
         private RectTransform canvasRect;
@@ -26,6 +31,14 @@ namespace MindTiles.UI
 
         private void OnEnable()
         {
+            Apply();
+        }
+
+        // Changes the designed height (e.g. a taller header in Endless) and re-applies.
+        public void SetDesignHeight(float height)
+        {
+            if (panel == null) Apply();
+            designSize.y = height;
             Apply();
         }
 
@@ -58,17 +71,18 @@ namespace MindTiles.UI
             lastParentRect = ReadRect(parent);
             lastCanvasRect = ReadRect(canvasRect);
 
-            // Top edge from the designed layout.
+            // Edges from the designed layout...
             panel.anchoredPosition = designAnchoredPosition;
             panel.sizeDelta = designSize;
             panel.GetWorldCorners(corners);
-            float top = corners[1].y;
+            float left = corners[0].x, right = corners[2].x, bottom = corners[0].y, top = corners[1].y;
 
-            // Left, right and bottom from the whole screen (canvas).
+            // ...then the chosen ones pushed out to the whole screen (canvas).
             canvasRect.GetWorldCorners(corners);
-            float left = corners[0].x;
-            float right = corners[2].x;
-            float bottom = corners[0].y;
+            if (extendLeft) left = corners[0].x;
+            if (extendRight) right = corners[2].x;
+            if (extendBottom) bottom = corners[0].y;
+            if (extendTop) top = corners[1].y;
 
             Vector3 lossy = panel.lossyScale;
             if (lossy.x <= 0f || lossy.y <= 0f || top <= bottom) return;

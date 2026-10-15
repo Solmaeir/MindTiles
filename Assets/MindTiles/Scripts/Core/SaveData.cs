@@ -9,7 +9,7 @@ namespace MindTiles.Core
     [Serializable]
     public class SaveData
     {
-        public const int CurrentVersion = 4;
+        public const int CurrentVersion = 5;
 
         public int version = CurrentVersion;
 
@@ -22,6 +22,9 @@ namespace MindTiles.Core
         public int highScore;           // best run score ever
         public int currentLevel;        // level to resume at; 0 = nothing saved yet
 
+        // Days in a row with a finished Daily Streak run (the weekly bar on the menu)
+        public DailyStreakSave dailyStreak = new DailyStreakSave();
+
         // Endless progress
         public EndlessSave endless = new EndlessSave();
 
@@ -33,7 +36,9 @@ namespace MindTiles.Core
         {
             if (settings == null) settings = new SettingsData();
             if (endless == null) endless = new EndlessSave();
+            if (dailyStreak == null) dailyStreak = new DailyStreakSave();
             endless.Sanitize();
+            dailyStreak.Sanitize();
             oneTileHints = Math.Max(0, oneTileHints);
             allTilesHints = Math.Max(0, allTilesHints);
             highScore = Math.Max(0, highScore);
@@ -49,6 +54,21 @@ namespace MindTiles.Core
         public float musicVolume = 1f;
         public float sfxVolume = 1f;
         public bool vibration = true;
+    }
+
+    // Daily Streak chain: how many days in a row the player finished the Daily
+    // run, and the (device-local) date of the last one. Read through DailyStreak.
+    [Serializable]
+    public class DailyStreakSave
+    {
+        public int count;
+        public string lastDay = "";     // yyyy-MM-dd, local time; empty = never finished
+
+        public void Sanitize()
+        {
+            count = Math.Max(0, count);
+            if (lastDay == null) lastDay = "";
+        }
     }
 
     // Endless mode state. Kept forever: total score and difficulty progress

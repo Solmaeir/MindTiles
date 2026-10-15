@@ -1,6 +1,7 @@
 using System.Collections;
 using TMPro;
 using UnityEngine;
+using MindTiles.Audio;
 
 namespace MindTiles.UI
 {
@@ -18,6 +19,8 @@ namespace MindTiles.UI
             if (preWait > 0)
                 yield return new WaitForSeconds(preWait);
 
+            // One clip covers the whole 3-2-1.
+            AudioManager.PlayCountdown();
             for (int count = 3; count > 0; count--)
             {
                 countdownText.text = count.ToString();
@@ -25,6 +28,7 @@ namespace MindTiles.UI
             }
 
             countdownText.text = "GO!";
+            AudioManager.Play(Sfx.CountdownGo);
             yield return new WaitForSeconds(1f);
 
             panel.SetActive(false);

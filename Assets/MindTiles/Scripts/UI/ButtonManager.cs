@@ -2,6 +2,7 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
+using MindTiles.Audio;
 using MindTiles.Core;
 
 namespace MindTiles.UI
@@ -164,12 +165,18 @@ namespace MindTiles.UI
 
         private void UseHint()
         {
-            if (hintManager != null) hintManager.UseOneTileHint();
+            if (hintManager != null) PlayHintResult(hintManager.UseOneTileHint());
         }
 
         private void UseSecondHint()
         {
-            if (hintManager != null) hintManager.UseAllTilesHint();
+            if (hintManager != null) PlayHintResult(hintManager.UseAllTilesHint());
+        }
+
+        // Hint buttons have no UISound: whether the hint went through decides the sound.
+        private static void PlayHintResult(bool used)
+        {
+            AudioManager.Play(used ? Sfx.HintUsed : Sfx.HintUnavailable);
         }
     }
 }

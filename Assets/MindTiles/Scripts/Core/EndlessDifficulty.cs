@@ -136,11 +136,13 @@ namespace MindTiles.Core
 
         // Called once per checked level (by the player or by the timer).
         // Scores it, updates the rating, moves the stage if earned, advances
-        // to the next level and saves. Returns the points earned.
-        public int RecordLevel(int correct, int total, float timeUsed, float timeLimit, int pointsPerTile)
+        // to the next level (only if passed) and saves. Returns the points earned.
+        public int RecordLevel(int correct, int total, float timeUsed, float timeLimit, int pointsPerTile, bool passed)
         {
             float speed = ScoreCalculator.SpeedFactor(timeUsed, timeLimit);
-            int points = ScoreCalculator.LevelPoints(correct, total, speed, pointsPerTile, maxSpeedBonus);
+            // A failed level gives no points and is replayed, but still counts
+            // toward the rating (so repeated fails can demote).
+            int points = passed ? ScoreCalculator.LevelPoints(correct, total, speed, pointsPerTile, maxSpeedBonus) : 0;
             float performance = ScoreCalculator.LevelPerformance(correct, total, speed, speedShareInPerformance);
 
             EndlessSave s = State;
@@ -154,7 +156,7 @@ namespace MindTiles.Core
                 EvaluateStage(s);
             }
 
-            s.level++;
+            if (passed) s.level++;
             SaveSystem.Save();
             return points;
         }

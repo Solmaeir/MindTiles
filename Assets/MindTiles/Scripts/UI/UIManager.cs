@@ -1,5 +1,6 @@
 using TMPro;
 using UnityEngine;
+using MindTiles.Audio;
 using MindTiles.Core;
 
 namespace MindTiles.UI
@@ -25,9 +26,26 @@ namespace MindTiles.UI
         [SerializeField] private Color timerWarningColor = new Color(1f, 0.35f, 0.35f, 1f);
         [SerializeField, Min(0)] private int timerWarningSeconds = 5;
 
+        [Header("Header Panel")]
+        [Tooltip("Panel behind the header; its height follows the mode (Endless shows more lines).")]
+        [SerializeField] private FillToScreenEdges headerPanel;
+        [SerializeField] private float dailyHeaderHeight = 230f;
+        [SerializeField] private float endlessHeaderHeight = 330f;
+
         [Header("End Panel")]
         [SerializeField] private TextMeshProUGUI currentScoreText;
         [SerializeField] private TextMeshProUGUI highestScoreText;
+        [Tooltip("Title of the end panel (\"COMPLETED!\" / \"TRY AGAIN\").")]
+        [SerializeField] private TMP_Text resultTitleText;
+        [Tooltip("Label of the end panel's Next button (becomes \"Retry\" when the level failed).")]
+        [SerializeField] private TMP_Text nextButtonLabel;
+        [SerializeField] private string passedTitle = "COMPLETED!";
+        [SerializeField] private string failedTitle = "TRY AGAIN";
+        [SerializeField] private string nextLabel = "Next";
+        [SerializeField] private string retryLabel = "Retry";
+        [Tooltip("After the last Daily Streak level.")]
+        [SerializeField] private string runCompleteTitle = "RUN COMPLETE!";
+        [SerializeField] private string runCompleteLabel = "Main Menu";
 
         private bool endlessMode;
         private int shownTimerSeconds = -1;
@@ -49,9 +67,11 @@ namespace MindTiles.UI
             endlessMode = endless;
             if (levelText != null) levelText.gameObject.SetActive(!endless);
             if (endlessHeader != null) endlessHeader.SetActive(endless);
+            if (headerPanel != null) headerPanel.SetDesignHeight(endless ? endlessHeaderHeight : dailyHeaderHeight);
         }
 
         // m:ss, rewritten only when the shown second changes (no per-frame strings).
+        // In the last seconds it turns red and ticks once per second.
         public void UpdateTimer(float secondsRemaining)
         {
             if (endlessTimerText == null) return;
@@ -61,7 +81,18 @@ namespace MindTiles.UI
             shownTimerSeconds = seconds;
 
             endlessTimerText.text = $"{seconds / 60}:{seconds % 60:00}";
-            endlessTimerText.color = seconds <= timerWarningSeconds ? timerWarningColor : timerNormalColor;
+            bool warning = seconds <= timerWarningSeconds;
+            endlessTimerText.color = warning ? timerWarningColor : timerNormalColor;
+            if (warning && seconds > 0) AudioManager.Play(Sfx.TimerWarning);
+        }
+
+        // End panel title and Next/Retry/Main Menu label for the level just checked.
+        public void ShowRoundResult(bool passed, bool runComplete)
+        {
+            if (resultTitleText != null)
+                resultTitleText.text = runComplete ? runCompleteTitle : passed ? passedTitle : failedTitle;
+            if (nextButtonLabel != null)
+                nextButtonLabel.text = runComplete ? runCompleteLabel : passed ? nextLabel : retryLabel;
         }
 
         public void UpdateLevelText(string level)
@@ -72,8 +103,8 @@ namespace MindTiles.UI
         }
 
         // End panel stat cells: small dim label over a big gold value.
-        private const string LabelStart = "<size=48%><color=#FFFFFFB3>";
-        private const string LabelEnd = "</color></size>\n<color=#FFE07A>";
+        private const string LabelStart = "<size=46%><color=#D9CCFFCC><cspace=0.12em>";
+        private const string LabelEnd = "</cspace></color></size>\n<color=#FFC79A>";
         private const string ValueEnd = "</color>";
 
         private static string Stat(string label, string value)
@@ -98,7 +129,7 @@ namespace MindTiles.UI
             }
 
             if (currentScoreText != null)
-                currentScoreText.text = Stat("SCORE", gm.SessionScore.ToString("D3"));
+                currentScoreText.text = Stat(gm.RunComplete ? "TOTAL SCORE" : "SCORE", gm.SessionScore.ToString("D3"));
             if (highestScoreText != null)
                 highestScoreText.text = Stat("HIGHEST SCORE", gm.HighScore.ToString("D3"));
         }
